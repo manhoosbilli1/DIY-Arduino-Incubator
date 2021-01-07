@@ -199,6 +199,7 @@ void sensor_handler()
     t = dht.readTemperature();
     f = dht.readTemperature(true);
     //ds18b20 value
+    sensors.requestTemperatures();
     ds_t = sensors.getTempCByIndex(0);
     prevTime = currentTime;
     updateSensor = true;

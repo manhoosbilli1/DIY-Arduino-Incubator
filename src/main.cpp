@@ -6,6 +6,10 @@
 #include <DallasTemperature.h>
 #include <TimerOne.h>
 #include <PID_v1.h>
+#include "RTClib.h"
+#include <TimeLib.h>
+#include <menu.h>
+#include "motor_controller.h"
 //variables
 #define clk 3
 #define dt 4
@@ -14,12 +18,13 @@
 #define DHTPIN 7
 #define DHTTYPE DHT22
 #define heater 6
+#define humidifier A0
+#define dehumFan A1
+double Setpoint = 28.71, h_setPoint = 60.0, Input, Output; //default values should be set incase eeprom does not work.
 
-double Setpoint = 28.71, h_setPoint = 60.0, Input, Output;
+double Kp = 10, Ki = 5, Kd = 1.8; //make ki lower if you want slower rise and fall of output.
 
-double Kp = 10, Ki = 5, Kd =1.8;
-
-unsigned long currentTime = 0, lastTime = 0;
+unsigned long currentTime = 0, lastTime = 0; //timers
 
 volatile boolean TurnDetected, up;
 
@@ -42,6 +47,8 @@ PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
 
 LiquidCrystal_I2C lcd(0x27, 16, 2); // set the LCD address to 0x27 for a 16 chars and 2 line display
 
+RTC_DS3231 rtc;
+
 //structs  and enums
 enum menu
 {
@@ -52,7 +59,15 @@ enum menu
   page4 = 4
 } page;
 
-//function definition
+
+enum heaterMode
+{
+  DC = 0,
+  AC = 1,
+  RELAY = 2
+}heaterMode;
+
+//function declrations
 void isr1();
 
 void menu();
@@ -75,6 +90,8 @@ void compute();
 
 void count();
 
+void motor_handler();
+
 void setup()
 {
   //begin stuff
@@ -90,6 +107,11 @@ void setup()
 
   myPID.SetSampleTime(2300);
 
+  if (!rtc.begin()) //make it print to lcd if this happens
+  {
+    abort();
+  }
+
   //pin intiation
   pinMode(LED_BUILTIN, OUTPUT);
 
@@ -98,6 +120,10 @@ void setup()
   pinMode(dt, INPUT);
 
   pinMode(sw, INPUT);
+
+  pinMode(dehumFan, OUTPUT);
+
+  pinMode(humidifier, OUTPUT);
 
   attachInterrupt(digitalPinToInterrupt(clk), isr1, CHANGE);
 
@@ -108,11 +134,12 @@ void setup()
 
 void loop()
 {
+  DateTime now = rtc.now();
   currentTime = millis();
   rotary_handler();
   sensor_handler(); //handles requesting data from sensors
-  myPID.Compute();
-  analogWrite(heater, Output);
+  //myPID.Compute();
+  //analogWrite(heater, Output);
   switch (counter) //handles menu
   {
   case home:
@@ -121,7 +148,7 @@ void loop()
     break;
 
   case page1:
-    display_handler(0, 0, "set PID const", "menu2");
+    display_handler(0, 0, "days to hatch", "menu2");
     break;
 
   case page2:
@@ -146,6 +173,7 @@ void isr1()
   TurnDetected = true;
   up = (digitalRead(clk) == digitalRead(dt));
 }
+
 void rotary_handler()
 {
   if (TurnDetected)
@@ -153,24 +181,16 @@ void rotary_handler()
     if (up)
     {
       if (counter != counterMax)
-      {
         counter++;
-      }
       else
-      {
         counter = 0;
-      }
     }
     else
     {
       if (counter != counterMin)
-      {
         counter--;
-      }
       else
-      {
         counter = counterMax;
-      }
     }
     TurnDetected = false;
   }
@@ -180,6 +200,7 @@ void rotary_handler()
     updateMenu = true;
   }
 }
+
 void display_handler(
     int sensor_update,
     int arrowPos,
@@ -230,12 +251,14 @@ void display_handler(
     }
   }
 }
+
 void count()
 {
   counter1++;
   if (counter1 > 80)
     counter1 = 0;
 }
+
 void sensor_handler()
 {
   volatile unsigned long currentTime = millis();
@@ -250,7 +273,32 @@ void sensor_handler()
     sensors.requestTemperatures();
     float ds_t = sensors.getTempCByIndex(0);
     Input = (t + ds_t) / 2; //returns average value between two.  TODO: make an if statement that this line will execute
-    prevTime = currentTime;    //only the user has chosen this mode of sensors. if user is using only one sensor.
-    updateSensor = true;       //equal currtemp to that only.
+    prevTime = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
+    updateSensor = true;    //equal currtemp to that only.
   }
 }
+
+
+
+/*
+*control everything related to humidity 
+*TODO: make it control water level 
+*/
+
+void humidity_handler()
+{
+
+  if (h > h_setPoint)
+  {
+    if (digitalRead(humidifier))
+      digitalWrite(humidifier, LOW); //if humidifier is on turn off
+
+    if (!digitalRead(dehumFan))
+      digitalWrite(dehumFan, HIGH); //if dehumidifier fan already on do nothing else turn on
+  }
+  else
+    digitalWrite(dehumFan, LOW); //turn off dehum fine to retain humidity
+}
+
+//leave the menu for last. for now just use the available function.
+//consider using ArduinoMenu library.

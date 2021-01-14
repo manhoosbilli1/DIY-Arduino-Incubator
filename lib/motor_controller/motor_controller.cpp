@@ -2,9 +2,11 @@
 #include <Arduino.h>
 #include "JC_Button.h"
 
-//TODO: make debounce class that will perform the same as JC button library or better 
+//TODO: make debounce class that will perform the same as JC button library or better
+//done. made the jc button library work by inheriting it.
 //TODO: find a way to make that class work with this library (might be hard)
-void MotorController::begin(uint8_t mode, uint8_t motor_pinA, uint8_t motor_pinB, uint8_t limitSw1 = 0, uint8_t limitSw2 = 1)
+//done.
+void MotorController::begin(uint8_t mode, uint8_t motor_pinA, uint8_t motor_pinB, uint8_t limitSw1, uint8_t limitSw2)
 {
 
     setMode(mode);
@@ -20,8 +22,8 @@ void MotorController::begin(uint8_t mode, uint8_t motor_pinA, uint8_t motor_pinB
     {
         pinMode(motor_pinA, OUTPUT);
         pinMode(motor_pinB, OUTPUT);
-        Button::Button sw1(limitSw1);
-        Button::Button sw2(limitSw1);
+        Button sw1(limitSw1);
+        Button sw2(limitSw1);
         sw1.begin(); //see to it that switches are working. im not sure this will work because of scope issue
         sw2.begin();
     }
@@ -63,7 +65,7 @@ unsigned long MotorController::getTurnInterval()
     {
         return turnInterval;
     }
-    return 0; 
+    return 0;
 }
 
 bool MotorController::isTime() //will tell if its time to turn

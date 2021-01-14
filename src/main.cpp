@@ -26,7 +26,7 @@ double Kp = 10, Ki = 5, Kd = 1.8; //make ki lower if you want slower rise and fa
 
 unsigned long currentTime = 0, lastTime = 0; //timers
 
-volatile boolean TurnDetected, up;
+volatile boolean TurnDetected, up; 
 
 int counter, arrow, prevCounter, counterMax = 5, counterMin = 0, incubationPeriod = 21, counter1 = 0;
 
@@ -105,7 +105,7 @@ void setup()
 
   myPID.SetMode(AUTOMATIC);
 
-  myPID.SetSampleTime(2300);
+  myPID.SetSampleTime(2300); //2.3 seconds
 
   if (!rtc.begin()) //make it print to lcd if this happens
   {

@@ -1,3 +1,4 @@
+//--------libraries-------------
 #include <Arduino.h> //libraries
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -7,174 +8,365 @@
 #include <PID_v1.h>
 #include "RTClib.h"
 #include <JC_Button.h>
-//Pins
+#include <EEPROM.h>
+#include "MenuData.h"
+
+#define LCD_ROWS 2
+#define LCD_COLS 16
+
+enum AppModeValues
+{
+  APP_NORMAL_MODE,
+  APP_MENU_MODE,
+  APP_PROCESS_MENU_CMD
+};
+byte appMode = APP_NORMAL_MODE;
+MenuManager Menu1(sampleMenu_Root, menuCount(sampleMenu_Root));
+
+char strbuf[LCD_COLS + 1]; // one line of lcd display
+byte btn;
+
+#define MOTORTYPETIMER
+//#define USINHHUMIDIFIER 1
+//#define SENSORMODEBOTH 1
+//#define USINGRTC 1
+//#define MOTORTYPELIMIT
+//#define HEATERMODERELAY 1
+#define SENSORMODEDHT 1
+//#define SENSORMODEDSB 1
+//#define USINGWATERPUMP 1
+const uint32_t sensorUpdateInterval = 2000;
+
+/*------------Pin definitions----------------*/
+#define motorPinA 11
+#define motorPinB 12
+#ifdef MOTORTYPELIMIT
+#define uint8_t limitSw1 = 10;
+#define uint8_t limitSw2 = 9;
+#endif
 #define ONE_WIRE_BUS 8
 #define DHTPIN 7
 #define DHTTYPE DHT22
 #define heater 6
 #define humidifier A0
 #define dehumFan A1
-
-const byte
-    pinUp(9),
-    pinDw(4),
-    pinSl(5);
-
-//motor controller variables
-
-uint8_t m_motor_pinA = 12; //default pin numbers. dont forget to change.
-uint8_t m_motor_pinB = 11; //this is defined and limit switches are not because those are assigned to object and these need to be used later on.
-#define STATE_IDLE 0
-#define STATE_MOVING_RIGHT 1
-#define STATE_MOVING_LEFT 2
-#define MOTORMODETIMER 1
-//#define MOTORMODELIMIT 0            //uncomment whichever mode using. default timer mode
-
-//motor controller user defined variables
-unsigned long turnDelay = 5000; //default 20sec
-uint8_t FREQ = 8;
-unsigned long turnInterval = (24 / FREQ) * 3600000UL; //calculates the turnInterval in milliseconds
-uint8_t prevState = 0;
-const uint8_t limitSw1 = -1;
-const uint8_t limitSw2 = -1;
-
-#define USINHHUMIDIFIER 1 //comment if not using humidifier.
-//#define HEATERMODERELAY 1 //comment if using AC or DC heater that can be controlled with mosfet.
-//#define sensorModeDHT 1  //uncomment whichever mode you want and comment the other ones.
-//#define sensorModeDSB 1
-#define sensorModeBOTH 1
-#define USINGRTC 1
-/*      Humidity related variables      */
-//#define USINGWATERPUMP 1 //if using water level sensor uncomment this
+const byte pinUp(9), pinDw(4), pinSl(5);
 #ifdef USINGWATERPUMP
-uint8_t waterLevelSensor; //if using water level sensor write the pin number
+uint8_t waterLevelSensorPin = A7;
+#endif
+
+/*EEPROM ADDRESSED*/
+#define tempAdd 0 //float
+#define humAdd 4  //int
+#define freqAdd 6 //int
+#define daysAdd 8 //int.
+/*----------Motor controller variables-----------*/
+uint8_t frequency = 8;
+uint32_t turnInterval;
+uint32_t turnDelay = 5000;
+uint32_t lastTime = 0;
+bool is_time = false;
+#define MOTOR_IDLE 0
+#define MOTOR_MOVING_LEFT 1
+#define MOTOR_MOVING_RIGHT 2
+
+//----------rest of variables------------
+#ifdef USINGWATERPUMP
 uint8_t waterMinLimit;
-uint8_t waterMaxLimit; //if using water level sensor mark, replace this with values. if not using level sensor use with time.
+uint8_t waterMaxLimit;
 #endif
-    //UNCOMMENT IF USING RTC COMMENT IF NOT.
-double Setpoint = 28.71, h_setPoint = 60.0, Input, Output; //default values should be set incase eeprom does not work.
-double Kp = 10, Ki = 5, Kd = 1.8;                          //make ki lower if you want slower rise and fall of output.
-unsigned long currentTime = 0, lastTime = 0, prevTime1 = 0, prevTime = 0;
-volatile boolean TurnDetected, up;
-unsigned int counter, prevCounter, counterMax = 5, counterMin = 0, incubationPeriod = 21, turnCounter;
-bool pressed = 1, updateSensor = 0, updateMenu = 0,turnedOnce = 0;
-float f, t, h, curTemp;
-
-//Object initiation
-#ifdef sensorModeDHT
+#ifndef HEATERMODERELAY
+double Output;
+double Kp = 10;
+double Ki = 5;
+double Kd = 1.8;
+#endif
+double tempSetpoint = 28.71;
+uint8_t humiditySetpoint = 60;
+double currentTemp;
+double f;
+double t;
+double h;
+double curTemp;
+uint32_t currentTime = 0;
+uint32_t prevTime1 = 0;
+uint8_t prevCounter;
+#define counterMax 5
+#define counterMin 0
+uint8_t daysToHatch = 21;
+uint8_t turnCounter;
+uint8_t prevState;
+uint8_t pageMax = 5;
+uint8_t pageMin = 0;
+uint8_t prevPage = 0;
+uint8_t page = 0;
+bool inMenu = 0;
+bool inSubMenu = 0;
+bool pressed = 1;
+bool update_sensor = 0;
+bool refreshFlag = true;
+bool refreshFlag1 = true;
+#define home 0
+#define page1 1
+#define page2 2
+#define page3 3
+#define page4 4
+#define ROOT 0
+volatile bool upState, dwState, slState;
+//------------OBJECT initialization------------
+#ifdef SENSORMODEDHT
 DHT dht(DHTPIN, DHTTYPE);
 #endif
-#ifdef sensorModeDSB
+#ifdef SENSORMODEDSB
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 #endif
-
-#ifdef sensorModeBOTH
+#ifdef SENSORMODEBOTH
 DHT dht(DHTPIN, DHTTYPE);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 #endif
-
 #ifndef HEATERMODEREALY //only if not using relay
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+PID myPID(&currentTemp, &Output, &tempSetpoint, Kp, Ki, Kd, DIRECT);
 #endif
-
 LiquidCrystal_I2C lcd(0x27, 16, 2); // set the LCD address to 0x27 for a 16 chars and 2 line display
-
-//buttons initialization
+#ifdef MOTORTYPELIMIT
 Button sw1(limitSw1);
 Button sw2(limitSw1);
+#endif
 Button UP(pinUp); //up
 Button DW(pinDw); //down
 Button SL(pinSl); //select
-
+#ifdef USINGRTC
 RTC_DS3231 rtc;
+#endif
 
-//structs  and enums
-enum menu
-{
-  home = 0,
-  page1 = 1,
-  page2 = 2,
-  page3 = 3,
-  page4 = 4
-} page;
-
-//function declrations
-void menu();
-void sensor_handler();
-void display_handler(
-    int sensor_update = 0,
-    int arrowPos = 0,
-    String menu1 = "menu",
-    String menu2 = "menu",
-    int menu1x = 1,
-    int menu1y = 0,
-    int menu2x = 1,
-    int menu2y = 1);
-void compute();
-void motorUpdate();
-void button_handler();
-bool turnOnce();
+/*------------function declarations--------------*/
 bool isTime();
-void humidity_handler();
-void update_display(uint8_t counter);
+void motorHandler();
+void updateSwitches();
+void updateMenu();
+void correction();
+void menuHandler();
+void readFromEEPROM();
+bool turnMotorOnce();
+void updateSensor();
+void homeMenu();
+void poll();
+extern char *inttostr(char *dest, short integer);
+// Apply left padding to string.
+extern char *lpad(char *dest, const char *str, char chr = ' ', unsigned char width = LCD_COLS);
+// Apply right padding to string.
+extern char *rpad(char *dest, const char *str, char chr = ' ', unsigned char width = LCD_COLS);
+// Apply string concatenation. argc = number of string arguments to follow.
+extern char *fmt(char *dest, unsigned char argc, ...);
+char *padc (char chr, unsigned char count);
+byte processMenuCommand(byte cmdId);
+void refreshMenuDisplay(byte refreshMode);
+byte getNavAction();
+
 
 void setup()
 {
-  //begin stuff here
-  #ifdef sensorModeDHT
+  // put your setup code here, to run once:
+  //EEPROM.put(tempAdd,tempSetpoint);
+  appMode = APP_NORMAL_MODE;
+  refreshMenuDisplay(REFRESH_DESCEND);
+#ifdef SENSORMODEDHT
   dht.begin();
 #endif
-#ifdef sensorModeDSB
+#ifdef SENSORMODEDSB
   sensors.begin();
 #endif
-#ifdef sensorModeBOTH
+#ifdef SENSORMODEBOTH
   dht.begin();
   sensors.begin();
 #endif
   lcd.init();
   lcd.backlight();
-
-#ifdef MOTORMODELIMIT
+#ifdef MOTORTYPELIMIT
   sw1.begin();
   sw2.begin(); //create a conditional here if mode is limit only then initialize.
 #endif
   DW.begin();
   UP.begin();
   SL.begin();
-
 #ifndef HEATERMODERELAY
-  myPID.SetMode(AUTOMATIC);
-  myPID.SetSampleTime(2300); //2.3 seconds
+//  myPID.SetMode(AUTOMATIC);
+//  myPID.SetSampleTime(2300); //2.3 seconds
 #endif
-
 #ifdef USINGRTC
   if (!rtc.begin()) //make it print to lcd if this happens
   {
     abort();
   }
 #endif
-  //pin intiation*/
-  pinMode(m_motor_pinA, OUTPUT);
-  pinMode(m_motor_pinB, OUTPUT);
-  //pinMode(dehumFan, OUTPUT);
+
+  //---------PINS INITIALIZATION-------------
+  pinMode(motorPinA, OUTPUT);
+  pinMode(motorPinB, OUTPUT);
+  pinMode(dehumFan, OUTPUT);
 #ifdef USINGHUMIDIFIER
   pinMode(humidifier, OUTPUT);
+  pinMode(waterLevelSensor, OUTPUT);
 #endif
+  //should be called after values are read from EEPROM
+  //readFromEEPROM();
+  //turnInterval = (24 / frequency) * 3600000;
 }
 
 void loop()
 {
-  DateTime now = rtc.now();
+  // put your main code here, to run repeatedly:
   currentTime = millis();
-  sensor_handler(); //handles requesting data from sensors
-  button_handler();
-  /*#ifndef HEATERMODERELAY
-  myPID.Compute();
-  analogWrite(heater, Output);
+  poll();
+  updateSensor();
+  //correction();
+  //motorHandler();
+  homeMenu();
+  switch (appMode)
+  {
+  case APP_NORMAL_MODE:
+    if (UP.pressedFor(1000))
+    {
+      lcd.clear();
+      appMode = APP_MENU_MODE;
+      refreshMenuDisplay(REFRESH_DESCEND);
+    }
+    break;
+  case APP_MENU_MODE:
+  {
+    byte menuMode = Menu1.handleNavigation(getNavAction, refreshMenuDisplay);
+
+    if (menuMode == MENU_EXIT)
+    {
+      lcd.clear();
+      lcd.print("Hold UP for menu");
+      appMode = APP_NORMAL_MODE;
+    }
+    else if (menuMode == MENU_INVOKE_ITEM)
+    {
+      appMode = APP_PROCESS_MENU_CMD;
+
+      // Indicate selected item.
+      if (Menu1.getCurrentItemCmdId())
+      {
+        lcd.setCursor(0, 1);
+        strbuf[0] = 0b01111110; // forward arrow representing input prompt.
+        strbuf[1] = 0;
+        lcd.print(strbuf);
+      }
+    }
+    break;
+  }
+  case APP_PROCESS_MENU_CMD:
+  {
+    byte processingComplete = processMenuCommand(Menu1.getCurrentItemCmdId());
+
+    if (processingComplete)
+    {
+      appMode = APP_MENU_MODE;
+      // clear forward arrow
+      lcd.setCursor(0, 1);
+      strbuf[0] = ' '; // clear forward arrow
+      strbuf[1] = 0;
+      lcd.print(strbuf);
+    }
+    break;
+  }
+  }
+}
+
+/* 
+refreshes the switch and buttons states also 
+will only work if on root level. 
+*/
+void updateSwitches()
+{
+  if (!inSubMenu)
+  {
+    DW.read();
+    UP.read();
+    SL.read();
+    if (UP.wasPressed())
+    {
+      if (page != pageMax)
+      {
+        page++;
+      }
+      else
+      {
+        page = pageMin;
+      }
+    }
+    else if (DW.wasPressed())
+    {
+      if (page != pageMin)
+      {
+        page--;
+      }
+      else
+      {
+        page = pageMax;
+      }
+    }
+    if (prevPage != page)
+    {
+      refreshFlag = true;
+      prevPage = page;
+    }
+  }
+}
+/*
+Will update the sensors and also take care 
+of making appropriate correction for 
+humidity. 
+*/
+void updateSensor()
+{
+  //Poles the sensors.
+  static bool flag = false;
+  if (((currentTime - prevTime1) >= sensorUpdateInterval) || (flag == true))
+  {
+
+#ifdef SENSORMODEDHT
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+    currentTemp = t;
+    prevTime1 = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
+    update_sensor = true;    //equal currtemp to that only.
+#endif
+#ifdef SENSORMODEDSB
+    sensors.requestTemperatures();
+    currentTemp = sensors.getTempCByIndex(0);
+    prevTime1 = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
+    updateSensor = true;     //equal currtemp to that only.
+#endif
+#ifdef SENSORMODEBOTH
+    if (!flag)
+    {
+      h = dht.readHumidity();
+      t = dht.readTemperature(); //if sensor mode is both sensors then it will measure one sensor. the turn on the flag
+      flag = true;               //for the other sensor to be measured. once that is measured in the next check. flag
+    }                            //will turn off. func wont run until one of the conditions become true.
+    else
+    {
+      sensors.requestTemperatures();
+      currentTemp = sensors.getTempCByIndex(0) + t / 2;
+      prevTime1 = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
+      update_sensor = true;    //equal currtemp to that only.
+      flag = false;            //this is used to break the time taken from measurement in half.
+    }
+#endif
+  }
+}
+void correction()
+{
+#ifndef HEATERMODERELAY
+  //myPID.Compute();
+  //analogWrite(heater, Output);
 #else
   //means using relay.
   if (Input >= Setpoint)
@@ -182,387 +374,344 @@ void loop()
   else
     digitalWrite(heater, HIGH);
 #endif
-*/
-  update_display(counter);
-  if (!turnedOnce)
-  {
-    turnOnce(); //will execute the function until it is true.
-  }
 
-}
+  //Makes the adjustment to humidifier.
+  /*
+#if defined(SENSORMODEDHT) || defined(SENSORMODEBOTH)
 
-void display_handler(int sensor_update, int arrowPos, String menu1, String menu2, int menu1x, int menu1y, int menu2x, int menu2y)
-{
-  if (counter > 0 && updateMenu == true)
-  {
-    lcd.clear();
-    if (arrowPos == 0)
-    {
-      lcd.setCursor(0, 0);
-      lcd.print(">");
-    }
-    if (arrowPos == 1)
-    {
-      lcd.setCursor(0, 1);
-      lcd.print(">");
-    }
-    lcd.setCursor(menu1x, menu1y);
-    lcd.print(menu1);
-    lcd.setCursor(menu2x, menu2y);
-    lcd.print(menu2);
-    updateMenu = false;
-  }
-
-  if (sensor_update == 1 && counter == 0)
-  {
-    if (updateSensor)
-    {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("T: ");
-      lcd.print(t);
-      lcd.setCursor(9, 0);
-      lcd.print("H: ");
-      lcd.print(h);
-      lcd.setCursor(0, 1);
-      lcd.print("Input:");
-      lcd.print(Input);
-      lcd.setCursor(13, 1);
-      lcd.print(counter); //printing output
-      updateSensor = false;
-    }
-  }
-}
-
-void sensor_handler()
-{
-  if ((currentTime - prevTime1) >= 2000)
-  {
-
-#ifdef sensorModeDHT
-    h = dht.readHumidity();
-    t = dht.readTemperature();
-    f = dht.readTemperature(true);
-    Input = t;
-    prevTime1 = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
-    updateSensor = true;     //equal currtemp to that only.
-#endif
-#ifdef sensorModeDSB
-    sensors.requestTemperatures();
-    Input = sensors.getTempCByIndex(0);
-    prevTime1 = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
-    updateSensor = true;     //equal currtemp to that only.
-#endif
-#ifdef sensorModeBOTH
-    h = dht.readHumidity();
-    t = dht.readTemperature();
-    f = dht.readTemperature(true);
-    sensors.requestTemperatures();
-    float ds_t = sensors.getTempCByIndex(0);
-    float average = (t + ds_t) / 2;
-    Input = average;
-    prevTime1 = currentTime; //only the user has chosen this mode of sensors. if user is using only one sensor.
-    updateSensor = true;     //equal currtemp to that only.
-#endif
-  }
-}
-
-void humidity_handler()
-{
-
-  if (h > h_setPoint)
+  if (h > humiditySetpoint)
   {
 #ifdef USINGHUMIDIFIER
-    if (digitalRead(humidifier))
-      digitalWrite(humidifier, LOW); //if humidifier is on turn off
+    digitalWrite(humidifier, LOW); //if humidifier is on turn off
 #endif
-    if (!digitalRead(dehumFan))
-      digitalWrite(dehumFan, HIGH); //if dehumidifier fan already on do nothing else turn on
+    digitalWrite(dehumFan, HIGH); //if dehumidifier fan already on do nothing else turn on
   }
   else
     digitalWrite(dehumFan, LOW); //turn off dehum fine to retain humidity
 
 #ifdef USINGWATERPUMP
-  if (analogRead(waterLevelSensor) < (waterMinLimit - 5))
+  if (analogRead(waterLevelSensor) < (waterMinLimit))
   {
 
     while (analogRead(waterLevelSensor) >= waterMaxLimit)
     {
-      pinMode(waterLevelSensor, OUTPUT);
       digitalWrite(waterLevelSensor, HIGH);
     }
     digitalWrite(waterLevelSensor, LOW);
   }
 #endif
-  if (h < (h_setPoint - 5))
-  {
-    digitalWrite(dehumFan, LOW);
 #ifdef USINGHUMIDIFIER
-    digitalWrite(humidifier, HIGH);
-#endif
+  switch (humStage)
+  {
+  case 0: //checks if hum is low.
+        if(h < (h_setPoint)
+        {
+      humTimer = millis(); //start the timer to check if it wasn't noise.
+      humStage = 1;        //swithc the case to 1.
+      prevHum = h;         //record the hum for future reference 
+        }
+        else
+        {
+      digitalWrite(humidifier, LOW); //if h is not lower than set point. turn off the humidifier. ez. 
+        }
+        break;
+
+      case 1: //makes sure it wasn't just some wind or sensor noise.
+        if(((currentTime - humTimer) >= 120000) && (prevHum - h >0)) //if still falling. 
+        {
+      correctionTimer = millis(); //record the timer for next case.
+      prevHum = h;
+      humStage = 2; 
+        }
+        break;
+
+      case 2:                       //do the correction. 
+        if(h >= h_setPoint)         // while doing the adjustment. value in now equal to desired humidity. 
+        {
+      repititions = 0;
+      humStage = 0; //reset the case to 0. 
+        }
+        if(((currentTime - correctionTimer) <= 120000) || repititions != 0)   //run the correction program for 2 minutes. 
+        {
+      digitalWrite(humidifier, HIGH); 
+        }                                       //if this flag is true. it will bypass the time calculation and just adjust
+        else if((prevHum - h) < 0)              //if difference is negetive. meaning humidity is restoring.
+          {
+      repititions = 0;
+      humStage = 0; //switch to initial stage. 
+          }
+          else
+          {
+      //if humidity is not restoring resetting reset the timer. so humidifer can run for 2 minutes more.
+      correctionTimer = currentTime; //reset the timer.   
+          }
+        break;
   }
-  //turn off humidity low light or alarm.
+#endif
+#endif
+*/
 }
 
-//--------------motor controller part-------------
+/*
+Calculates when its time to turn the motors. 
+*/
 
-bool isTime() //will tell if its time to turn
+bool isTime()
 {
-  if ((millis() - prevTime) >= turnInterval)
+  if ((currentTime - lastTime) == turnInterval)
   {
-    prevTime = millis();
+    lastTime = currentTime;
     return true;
   }
   return false;
-  //this should return nothing unless the statement in if condition is returned. if it does, gg
 }
 
-void update() //this is going to run in loop.
+/*
+when its time, turns the motors. 
+this should be run in loop so that it always knows when its time
+*/
+void motorHandler()
 {
-  uint32_t timer; //remember this is local scope. might pose problem. this is used to record millis
   static bool is_time = false;
+  static uint8_t currentState = 0;
   if (isTime())
   {
-    is_time = true; //we catch the flag.
-    if (turnCounter == FREQ)
-      turnCounter = 0;
+    is_time = true;
   }
-
-  static uint8_t currentState = 0; //using keyword static so that it remembers its state. and not get reinitialized
-
-#ifdef MOTORMODETIMER
-  if (is_time) //if its time to turn
+  if (is_time) //runs the motor if its time.
   {
+//turning the motor.
+#ifdef MOTORTYPETIMER
+    static uint32_t timer = 0;
     switch (currentState)
     {
-
-    case STATE_IDLE:
-      if ((prevState != STATE_MOVING_LEFT) && (prevState != STATE_MOVING_RIGHT)) //then move right
+    case MOTOR_IDLE:
+      if ((prevState != MOTOR_MOVING_LEFT) && (prevState != MOTOR_MOVING_RIGHT)) //then move right
       {
-        digitalWrite(m_motor_pinA, HIGH);
-        digitalWrite(m_motor_pinB, LOW);
-        timer = millis();                 //record the time
-        currentState = STATE_MOVING_LEFT; //direction is abstract. doesn't matter
+        digitalWrite(motorPinA, HIGH);
+        digitalWrite(motorPinB, LOW);     //turn towards any random direction.
+        timer = millis();                 //start the timer
+        currentState = MOTOR_MOVING_LEFT; //direction is abstract. doesn't matter
       }
-
-      if (prevState == STATE_MOVING_LEFT)
+      if (prevState == MOTOR_MOVING_LEFT)
       {
-        digitalWrite(m_motor_pinA, LOW);
-        digitalWrite(m_motor_pinB, HIGH);
+        digitalWrite(motorPinA, LOW);
+        digitalWrite(motorPinB, HIGH);
         timer = millis();
-        currentState = STATE_MOVING_RIGHT;
+        currentState = MOTOR_MOVING_RIGHT;
       }
-
-      if (prevState == STATE_MOVING_RIGHT)
+      if (prevState == MOTOR_MOVING_RIGHT)
       {
-        digitalWrite(m_motor_pinA, HIGH);
-        digitalWrite(m_motor_pinB, LOW);
+        digitalWrite(motorPinA, HIGH);
+        digitalWrite(motorPinB, LOW);
         timer = millis();
-        currentState = STATE_MOVING_LEFT;
+        currentState = MOTOR_MOVING_LEFT;
       }
       break;
 
-    case STATE_MOVING_LEFT:
+    case MOTOR_MOVING_LEFT:
       if (millis() - timer <= turnDelay) //
       {
         //wait for the motor to reach the other extreme position
       }
       else
       {
-        digitalWrite(m_motor_pinA, LOW);
-        digitalWrite(m_motor_pinB, LOW); //turn off the motors since destination reached
-        prevState = STATE_MOVING_LEFT;   //write this to eeprom just to be safe
+        digitalWrite(motorPinA, LOW);
+        digitalWrite(motorPinB, LOW);  //turn off the motors since destination reached
+        prevState = MOTOR_MOVING_LEFT; //write this to eeprom just to be safe
         turnCounter++;
         is_time = false; //just turned. turn off the flag and wait for it to occur again.
-        currentState = STATE_IDLE;
+        currentState = MOTOR_IDLE;
       }
       break;
 
-    case STATE_MOVING_RIGHT:
+    case MOTOR_MOVING_RIGHT:
       if (millis() - timer <= turnDelay)
       {
         //wait for the motor to reach the other extreme position
       }
       else
       {
-        digitalWrite(m_motor_pinA, LOW);
-        digitalWrite(m_motor_pinB, LOW);
-        prevState = STATE_MOVING_RIGHT;
-        turnCounter++;
+        digitalWrite(motorPinA, LOW);
+        digitalWrite(motorPinB, LOW);
+        prevState = MOTOR_MOVING_RIGHT;
+        turnCounter++; //once done turning the motor turn off the motor toggle variable.
         is_time = false;
-        currentState = STATE_IDLE;
+        currentState = MOTOR_IDLE;
       }
       break;
     }
   }
 #endif
-#ifdef MOTORMODELIMIT
-  static bool is_time = false;
+#ifdef MOTORTYPELIMIT
   if (isTime())
   {
     is_time = true; //we catch the flag.
   }
-  static uint8_t currentState = 0; //using static so that it remembers its state.
   if (is_time)
   {
     switch (currentState)
     {
-    case STATE_IDLE:
+    case MOTOR_IDLE:
       if ((sw1.read() == false) && (sw2.read() == false)) //tray is in unknown state. needs calibration
       {
-        digitalWrite(m_motor_pinA, HIGH);
-        digitalWrite(m_motor_pinA, LOW);
-        currentState = STATE_MOVING_LEFT; //switch state
+        digitalWrite(motorPinA, HIGH);
+        digitalWrite(motorPinA, LOW);
+        currentState = MOTOR_MOVING_LEFT; //switch state
       }
 
       if ((sw1.read() == true) && (sw2.read() == false)) //already at left. time to go right
       {
-        digitalWrite(m_motor_pinA, HIGH);
-        digitalWrite(m_motor_pinB, LOW);
-        currentState = STATE_MOVING_RIGHT;
+        digitalWrite(motorPinA, HIGH);
+        digitalWrite(motorPinB, LOW);
+        currentState = MOTOR_MOVING_RIGHT;
       }
 
       if ((sw1.read() == false) && (sw2.read() == true)) //already at right. time to go left.
       {
-        digitalWrite(m_motor_pinA, LOW);
-        digitalWrite(m_motor_pinB, LOW);
-        currentState = STATE_IDLE;
+        digitalWrite(motorPinA, LOW);
+        digitalWrite(motorPinB, HIGH);
+        currentState = MOTOR_MOVING_LEFT;
       }
       break;
 
-    case STATE_MOVING_LEFT:
+    case MOTOR_MOVING_LEFT:
       if ((sw1.read() == true) && (sw2.read() == false)) //means tray is tilted one way.
       {
-        digitalWrite(m_motor_pinA, LOW);
-        digitalWrite(m_motor_pinB, LOW);
-        is_time = false;           //reset the time since tray reached destination
-        currentState = STATE_IDLE; //current state = idle when pc reaches switch statement.
+        digitalWrite(motorPinA, LOW);
+        digitalWrite(motorPinB, LOW);
+        is_time = false; //reset the time since tray reached destination
+        prevState = MOTOR_MOVING_LEFT;
+        turnCounter++;
+        currentState = MOTOR_IDLE; //current state = idle when pc reaches switch statement.
       }                            //it should start from idle instead of moving left case.
       break;
 
-    case STATE_MOVING_RIGHT:
+    case MOTOR_MOVING_RIGHT:
       if ((sw1.read() == false) && (sw2.read() == true))
       {
-        digitalWrite(m_motor_pinA, LOW);
-        digitalWrite(m_motor_pinB, LOW);
+        digitalWrite(motorPinA, LOW);
+        digitalWrite(motorPinB, LOW);
         is_time = false;
-        currentState = STATE_IDLE;
+        prevState = MOTOR_MOVING_RIGHT;
+        turnCounter++;
+        currentState = MOTOR_IDLE;
       }
       break;
     }
   }
-}
 #endif
 }
 
-bool turnOnce() //will turn the motor once. will not care about if its time for turning. if needs calibration will calibrate. but you need to run the function again.
+bool turnMotorOnce() //if returns true. turning is done.
 {
-#ifdef MOTORMODETIMER               //timer based motor
-  static uint32_t timer;            //remember this is local scope. might pose problem. this is used to record millis
-  static uint8_t currentState1 = 0; //using keyword static so that it remembers its state. and not get reinitialized
+#ifdef MOTORTYPETIMER
+  static uint32_t timer1 = 0;
+  static uint8_t currentState1 = 0;
   switch (currentState1)
   {
-  case STATE_IDLE:
-    if ((prevState != STATE_MOVING_LEFT) && (prevState != STATE_MOVING_RIGHT)) //then move right
+  case MOTOR_IDLE:
+    if ((prevState != MOTOR_MOVING_LEFT) && (prevState != MOTOR_MOVING_RIGHT)) //then move right
     {
-      digitalWrite(m_motor_pinA, HIGH);
-      digitalWrite(m_motor_pinB, LOW);
-      timer = millis();                  //record the time
-      currentState1 = STATE_MOVING_LEFT; //direction is abstract. doesn't matter
+      digitalWrite(motorPinA, HIGH);
+      digitalWrite(motorPinB, LOW);
+      timer1 = currentTime;              //record the time
+      currentState1 = MOTOR_MOVING_LEFT; //direction is abstract. doesn't matter
     }
 
-    if (prevState == STATE_MOVING_LEFT)
+    if (prevState == MOTOR_MOVING_LEFT)
     {
-      digitalWrite(m_motor_pinA, LOW);
-      digitalWrite(m_motor_pinB, HIGH);
-      timer = millis();
-      currentState1 = STATE_MOVING_RIGHT;
+      digitalWrite(motorPinA, LOW);
+      digitalWrite(motorPinB, HIGH);
+      timer1 = currentTime;
+      currentState1 = MOTOR_MOVING_RIGHT;
     }
 
-    if (prevState == STATE_MOVING_RIGHT)
+    if (prevState == MOTOR_MOVING_RIGHT)
     {
-      digitalWrite(m_motor_pinA, HIGH);
-      digitalWrite(m_motor_pinB, LOW);
-      timer = millis();
-      currentState1 = STATE_MOVING_LEFT;
+      digitalWrite(motorPinA, HIGH);
+      digitalWrite(motorPinB, LOW);
+      timer1 = currentTime;
+      currentState1 = MOTOR_MOVING_LEFT;
     }
     break;
 
-  case STATE_MOVING_LEFT:
-    if (millis() - timer <= turnDelay) //
+  case MOTOR_MOVING_LEFT:
+    if (currentTime - timer1 <= turnDelay) //
     {
       //wait for the motor to reach the other extreme position
     }
     else
     {
-      digitalWrite(m_motor_pinA, LOW);
-      digitalWrite(m_motor_pinB, LOW); //turn off the motors since destination reached
-      currentState1 = STATE_IDLE;
-      turnedOnce = true;
+      digitalWrite(motorPinA, LOW);
+      digitalWrite(motorPinB, LOW); //turn off the motors since destination reached
+      currentState1 = MOTOR_IDLE;
+      prevState = MOTOR_MOVING_LEFT;
       return true; //break the function when turning is done.
     }
     break;
 
-  case STATE_MOVING_RIGHT:
-    if (millis() - timer <= turnDelay)
+  case MOTOR_MOVING_RIGHT:
+    if (currentTime - timer1 <= turnDelay)
     {
       //wait for the motor to reach the other extreme position
     }
     else
     {
-      digitalWrite(m_motor_pinA, LOW);
-      digitalWrite(m_motor_pinB, LOW);
-      currentState1 = STATE_IDLE;
-      turnedOnce = true;
+      digitalWrite(motorPinA, LOW);
+      digitalWrite(motorPinB, LOW);
+      currentState1 = MOTOR_IDLE;
+      prevState = MOTOR_MOVING_RIGHT;
       return true; //break the function when turning is done.
     }
     break;
   }
 #endif
-#ifdef MOTORMODELIMIT
+#ifdef MOTORTYPELIMIT
   static uint8_t currentState1 = 0; //using static so that it remembers its state.
   switch (currentState1)
   {
-  case STATE_IDLE:
+  case MOTOR_IDLE:
     if ((sw1.read() == false) && (sw2.read() == false)) //tray is in unknown state. needs calibration
     {
-      digitalWrite(m_motor_pinA, HIGH);
-      digitalWrite(m_motor_pinA, LOW);
-      currentState1 = STATE_MOVING_LEFT; //switch state
+      digitalWrite(motorPinA, HIGH);
+      digitalWrite(motorPinA, LOW);
+      currentState1 = MOTOR_MOVING_LEFT; //switch state
     }
 
     if ((sw1.read() == true) && (sw2.read() == false)) //already at left. time to go right
     {
-      digitalWrite(m_motor_pinA, HIGH);
-      digitalWrite(m_motor_pinB, LOW);
-      currentState1 = STATE_MOVING_RIGHT;
+      digitalWrite(motorPinA, HIGH);
+      digitalWrite(motorPinB, LOW);
+      currentState1 = MOTOR_MOVING_RIGHT;
     }
 
     if ((sw1.read() == false) && (sw2.read() == true)) //already at right. time to go left.
     {
-      digitalWrite(m_motor_pinA, LOW);
-      digitalWrite(m_motor_pinB, LOW);
-      currentState1 = STATE_IDLE;
+      digitalWrite(motorPinA, LOW);
+      digitalWrite(motorPinB, LOW);
+      currentState1 = MOTOR_IDLE;
     }
     break;
 
   case STATE_MOVING_LEFT:
     if ((sw1.read() == true) && (sw2.read() == false)) //means tray is tilted one way.
     {
-      digitalWrite(m_motor_pinA, LOW);
-      digitalWrite(m_motor_pinB, LOW);
-      currentState1 = STATE_IDLE; //current state = idle when pc reaches switch statement.
-      return true;                //break the function when turning is done.
-    }                             //it should start from idle instead of moving left case.
-
+      digitalWrite(motorPinA, LOW);
+      digitalWrite(motorPinB, LOW);
+      currentState1 = MOTOR_IDLE; //current state = idle when pc reaches switch statement.
+      prevState = MOTOR_MOVING_LEFT;
+      return true; //break the function when turning is done.
+    }              //it should start from idle instead of moving left case.
     break;
 
   case STATE_MOVING_RIGHT:
     if ((sw1.read() == false) && (sw2.read() == true))
     {
-      digitalWrite(m_motor_pinA, LOW);
-      digitalWrite(m_motor_pinB, LOW);
-      currentState1 = STATE_IDLE;
+      digitalWrite(motorPinA, LOW);
+      digitalWrite(motorPinB, LOW);
+      currentState1 = MOTOR_IDLE;
+      prevState = MOTOR_MOVING_RIGHT;
       return true; //break the function when turning is done.
     }
     break;
@@ -572,67 +721,304 @@ bool turnOnce() //will turn the motor once. will not care about if its time for 
 return false;
 }
 
-//--------------motor controller part finished----------
-void button_handler() //this will read the buttons wherever you are. just call this function before checking and it should update the counter
+/*
+This can be used in every menu part where parameters have to be changed. 
+this takes a variable and when you press select. it modifies that variable. 
+TODO: still need to save it to the EEPROM. 
+*/
+
+void buttonListener(uint8_t &counter) //passing values by reference.
 {
-  DW.read();
-  UP.read();
-  SL.read();
-  if (UP.wasPressed())
+  static uint8_t count = 0;
+  if (UP.wasPressed()) //this should modify the variables address directly.
+    count++;
+  if (DW.wasPressed())
+    count--;
+  if (SL.wasPressed())
   {
-    if (counter != counterMax)
-    {
-      counter++;
-    }
-    else
-    {
-      counter = counterMin;
-    }
-  }
-  else if (DW.wasPressed())
-  {
-    if (counter != counterMin)
-    {
-      counter--;
-    }
-    else
-    {
-      counter = counterMax;
-    }
-  }
-  if (prevCounter != counter)
-  {
-    updateMenu = true;
-    prevCounter = counter;
-    Serial.println(counter);
+    counter = count;
+    count = 0;
   }
 }
 
-void update_display(uint8_t counter)
+/*
+Checks if the menu is not being used.
+it will discard the changes and jump back
+to homepage. 
+*/
+
+bool timeOutCheck(const uint32_t delay)
 {
-  switch (counter) //handles menu
+  static uint32_t timer = 0;
+  static bool firstTime = true;
+  if (firstTime)
   {
-  case home:
-    //display sensors
-    display_handler(1); //this updates only sensor vaues on screen
-    break;
+    timer = currentTime;
+    firstTime = false;
+  }
+  if ((currentTime - timer) >= delay)
+  {
+    page = 0;          //reset to main page. get out of all the level.
+    inSubMenu = false; //so that when you enter next time. it starts from root level.
+    timer = 0;
+    firstTime = true; //for next time. turn it on.
+    return true;
+  }
+  if (UP.wasPressed())   //this could cause the program to be stuck on that screen only if one of these buttons malfunction
+    timer = currentTime; //if there is anychange. reset the timer to prolong the delay.
+  if (DW.wasPressed())
+    timer = currentTime;
+  if (SL.wasPressed())
+    timer = currentTime;
 
-  case page1:
-    display_handler(0, 0, "Calc Hatch Day", "Set Turns / Day");
-    break;
+  return false;
+}
 
-  case page2:
-    display_handler(0, 1, "Calc Hatch Day", "Set Turns / Day");
-    break;
+void homeMenu()
+{
+  if (update_sensor == true && appMode == APP_NORMAL_MODE)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("T:");
+    lcd.print(currentTemp);
+    lcd.setCursor(9, 0);
+    lcd.print("H:");
+    lcd.print(h);
+    lcd.setCursor(0, 1);
+    lcd.print("TS:");
+    lcd.print(tempSetpoint);
+    lcd.setCursor(9, 1);
+    lcd.print(humiditySetpoint);
+    update_sensor = false;
+  }
+}
 
-  case page3:
-    display_handler(0, 0, "Set Turn Delay", "Using Water Pmp?");
-    break;
+void menuHandler()
+{
+}
 
-  case page4:
-    display_handler(0, 1, "Set Turn Delay", "Using Water Pmp?");
-    break;
-  default:
-    counter = 0;
+void readFromEEPROM()
+{
+
+  double tempSetpointTemp;
+  int frequencyTemp;
+  int humiditySetpointTemp;
+  EEPROM.get(tempAdd, tempSetpointTemp);
+  EEPROM.get(humAdd, humiditySetpointTemp);
+  EEPROM.get(freqAdd, frequencyTemp);
+  if (tempSetpointTemp <= 20 || tempSetpointTemp >= 50 || tempSetpointTemp == NAN)
+  {
+    EEPROM.put(tempAdd, tempSetpoint);
+  }
+  else
+  {
+    tempSetpoint = tempSetpointTemp;
+  }
+  if (humiditySetpointTemp <= 20 || humiditySetpointTemp >= 90)
+  {
+    EEPROM.put(humAdd, humiditySetpoint);
+  }
+  else
+  {
+    humiditySetpoint = humiditySetpointTemp;
+  }
+  if (frequencyTemp <= 1 || frequencyTemp >= 48)
+  {
+    EEPROM.put(freqAdd, frequency);
+  }
+  else
+  {
+    frequency = frequencyTemp;
+  }
+  //means the data retreived is corrupt. will resort to default values instead. other wise will load the new values.
+}
+
+void poll()
+{
+  UP.read();
+  DW.read();
+  SL.read();
+}
+
+//menu functions
+char *fmt(char *dest, unsigned char argc, ...)
+{
+  unsigned char buflen = 0;
+  char *str;
+
+  va_list ap;
+  va_start(ap, argc);
+
+  for (int i = 0; i < argc && buflen < LCD_COLS; i++)
+  {
+    str = va_arg(ap, char *);
+    unsigned char len = strlen(str);
+    unsigned char cpylen = (buflen + len) > LCD_COLS ? LCD_COLS - buflen : len;
+
+    strncpy((dest + buflen), str, cpylen);
+    buflen += len;
+  }
+  va_end(ap);
+  dest[buflen] = 0;
+  return dest;
+}
+
+char *rpad(char *dest, const char *str, char chr, unsigned char width)
+{
+  unsigned char len = strlen(str);
+
+  width = width > LCD_COLS ? LCD_COLS : width;
+
+  if (len < LCD_COLS && width > len)
+  {
+    strcpy(dest, str);
+    strcat(dest, padc(chr, width - len));
+  }
+  else
+  {
+    strncpy(dest, str, width + 1);
+  }
+  return dest;
+}
+
+char *lpad(char *dest, const char *str, char chr, unsigned char width)
+{
+  unsigned char len = strlen(str);
+
+  width = width > LCD_COLS ? LCD_COLS : width;
+
+  if (len < LCD_COLS && width > len)
+  {
+    strcpy(dest, padc(chr, width - len));
+    strcat(dest, str);
+  }
+  else
+  {
+    strncpy(dest, str, width + 1);
+  }
+  return dest;
+}
+
+char *padc(char chr, unsigned char count)
+{
+  static char strbuf[LCD_COLS + 1];
+
+  count = (count > LCD_COLS) ? LCD_COLS : count;
+
+  int i;
+  for (i = 0; i < count; i++)
+  {
+    strbuf[i] = chr;
+  }
+  strbuf[i] = 0;
+
+  return strbuf;
+}
+
+byte processMenuCommand(byte cmdId)
+{
+  byte complete = false;  // set to true when menu command processing complete.
+
+  if (SL.wasPressed())
+  {
+    complete = true;
+  }
+
+  switch (cmdId)
+  {
+    // TODO Process menu commands here:
+    default:
+      break;
+  }
+
+  return complete;
+}
+
+
+//----------------------------------------------------------------------
+// Callback to convert button press to navigation action.
+byte getNavAction()
+{
+  byte navAction = 0;
+  byte currentItemHasChildren = Menu1.currentItemHasChildren();
+
+  if (UP.wasPressed() || UP.pressedFor(1000)) navAction = MENU_ITEM_PREV;
+  else if (DW.wasPressed() || DW.pressedFor(1000)) navAction = MENU_ITEM_NEXT;
+  else if (SL.wasPressed()) navAction = MENU_ITEM_SELECT;
+  //else if (btn == BUTTON_LEFT_PRESSED) navAction = MENU_BACK;
+  return navAction;
+}
+
+
+//----------------------------------------------------------------------
+const char EmptyStr[] = "";
+
+// Callback to refresh display during menu navigation, using parameter of type enum DisplayRefreshMode.
+void refreshMenuDisplay (byte refreshMode)
+{
+  char nameBuf[LCD_COLS + 1];
+
+  /*
+    if (refreshMode == REFRESH_DESCEND || refreshMode == REFRESH_ASCEND)
+    {
+      byte menuCount = Menu1.getMenuItemCount();
+
+      // uncomment below code to output menus to serial monitor
+      if (Menu1.currentMenuHasParent())
+      {
+        Serial.print("Parent menu: ");
+        Serial.println(Menu1.getParentItemName(nameBuf));
+      }
+      else
+      {
+        Serial.println("Main menu:");
+      }
+
+      for (int i=0; i<menuCount; i++)
+      {
+        Serial.print(Menu1.getItemName(nameBuf, i));
+
+        if (Menu1.itemHasChildren(i))
+        {
+          Serial.println("->");
+        }
+        else
+        {
+          Serial.println();
+        }
+      }
+    }
+  */
+
+  lcd.setCursor(0, 0);
+  if (Menu1.currentItemHasChildren())
+  {
+    rpad(strbuf, Menu1.getCurrentItemName(nameBuf));
+    strbuf[LCD_COLS - 1] = 0b01111110;          // Display forward arrow if this menu item has children.
+    lcd.print(strbuf);
+    lcd.setCursor(0, 1);
+    lcd.print(rpad(strbuf, EmptyStr));          // Clear config value in display
+  }
+  else
+  {
+    byte cmdId;
+    rpad(strbuf, Menu1.getCurrentItemName(nameBuf));
+
+    if ((cmdId = Menu1.getCurrentItemCmdId()) == 0)
+    {
+      strbuf[LCD_COLS - 1] = 0b01111111;        // Display back arrow if this menu item ascends to parent.
+      lcd.print(strbuf);
+      lcd.setCursor(0, 1);
+      lcd.print(rpad(strbuf, EmptyStr));        // Clear config value in display.
+    }
+    else
+    {
+      lcd.print(strbuf);
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+
+      // TODO Display config value.
+    }
   }
 }

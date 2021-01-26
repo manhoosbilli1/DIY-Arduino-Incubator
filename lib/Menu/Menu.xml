@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<RootMenu xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <Config IdPrefix="mnuCmd" VarPrefix="sampleMenu" UseNumbering="false" IncludeNumberHierarchy="false" MaxNameLen="15" MenuBackFirstItem="false" BackText="Back" ExitText="Exit" AvrProgMem="true"/>
+    <MenuItems>
+        <Item Id="SetTemp" Name="Temp SetPoint"/>
+        <Item Id="SetHum" Name="Humidty SetPoint"/>
+        <Item Id="SetFreq" Name="Turns per day"/>
+        <Item Id="SetTurnDelay" Name="Tray Turn Delay"/>
+        <Item Id="SetTime" Name="Set Time">
+            <MenuItems>
+                <Item Id="SetHours" Name="Set Hours"/>
+                <Item Id="SetMins" Name="Set Minutes"/>
+                <Item Id="SetSeconds" Name="Set Seconds"/>
+                <Item Id="SetYear" Name="Set Year"/>
+                <Item Id="SetMonth" Name="Set Month"/>
+                <Item Id="SetDay" Name="Set Day"/>
+            </MenuItems>
+        </Item>
+        <Item Id="CalcHatchDay" Name="Calc Hatch Day">
+            <MenuItems>
+                <Item Id="SetDays" Name="Incubation Time"/>
+            </MenuItems>
+        </Item>
+    </MenuItems>
+</RootMenu>

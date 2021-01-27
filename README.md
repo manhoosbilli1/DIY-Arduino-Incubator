@@ -17,3 +17,17 @@ Start the software process:
 
 and ofcourse just start building. 
  
+#Episode 6:
+Just wanted to let the audience know which ide i was using and taught some basics about vscode and github. 
+https://www.youtube.com/watch?v=H_leyX6zwIo
+
+
+#Episode 7:
+I wanted to first make the software and see if it ran alright, rather than build and test at the same time. it certainly took alot of time if you take a look at the commit history even after working on this for over a year it still took me quite some time. i think it payed off. i am going to cover all the details about the code. 
+unfortunately i won't be able to go into as much basics as i wanted to due to the length and complexity of the code. but i will certainly leave links to the important stuff 
+in the description of the video. 
+
+Just merged the dev branch after testing almost all functions. now time to build on that and make it better, prettier and easier to understand. 
+I will share my findings from when i was building this project in the video because there is just alot to cover and typing requires too much time. 
+Also i haven't really commited properly just because i kept trying different ways to make the code work for almost any sitatuation so regular and correct 
+commits were not an option. 

@@ -1,24 +1,42 @@
 <?xml version="1.0"?>
 <RootMenu xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-    <Config IdPrefix="mnuCmd" VarPrefix="sampleMenu" UseNumbering="false" IncludeNumberHierarchy="false" MaxNameLen="15" MenuBackFirstItem="false" BackText="Back" ExitText="Exit" AvrProgMem="true"/>
+    <Config IdPrefix="runtimeCmd" VarPrefix="runtimeMenu" UseNumbering="false" IncludeNumberHierarchy="false" MaxNameLen="15" MenuBackFirstItem="false" BackText="Back" ExitText="Exit" AvrProgMem="true"/>
     <MenuItems>
-        <Item Id="SetTemp" Name="Temp SetPoint"/>
-        <Item Id="SetHum" Name="Humidty SetPoint"/>
-        <Item Id="SetFreq" Name="Turns per day"/>
-        <Item Id="SetTurnDelay" Name="Tray Turn Delay"/>
-        <Item Id="SetTime" Name="Set Time">
+        <Item Id="AdvancedSetup" Name="Advanced Setup">
             <MenuItems>
-                <Item Id="SetHours" Name="Set Hours"/>
-                <Item Id="SetMins" Name="Set Minutes"/>
-                <Item Id="SetSeconds" Name="Set Seconds"/>
-                <Item Id="SetYear" Name="Set Year"/>
-                <Item Id="SetMonth" Name="Set Month"/>
-                <Item Id="SetDay" Name="Set Day"/>
+            <Item Id="TurnMotorOnce" Name="Turn Motor Once"/>
+                <Item Id="SetTemp" Name="Temp SetPoint"/>
+                <Item Id="SetHum" Name="Hum SetPoint"/>
+                <Item Id="SetFreq" Name="Turns per day"/>
+                <Item Id="SetTurnDelay" Name="Tray Turn Delay"/>
+                <Item Id="SetTime" Name="Set Time">
+                    <MenuItems>
+                        <Item Id="SetHours" Name="Set Hours"/>
+                        <Item Id="SetMins" Name="Set Minutes"/>
+                        <Item Id="SetSeconds" Name="Set Seconds"/>
+                        <Item Id="SetYear" Name="Set Year"/>
+                        <Item Id="SetMonth" Name="Set Month"/>
+                        <Item Id="SetDay" Name="Set Day"/>
+                    </MenuItems>
+                </Item>
+                <Item Id="SetPID" Name="PID constants">
+                    <MenuItems>
+                        <Item Id="SetP" Name="Set P constant"/>
+                        <Item Id="SetI" Name="Set I constant"/>
+                        <Item Id="SetD" Name="Set D constant"/>
+                    </MenuItems>
+                </Item>
+                <Item Id="IncubationTime" Name="Incubation Time"/>
+                <Item Id="SaveProfile" Name="Save Profile"/>
             </MenuItems>
         </Item>
-        <Item Id="CalcHatchDay" Name="Calc Hatch Day">
+        <Item Id="ShowHatchDay" Name="Show Hatch Day"/>
+        <Item Id="CalcHatchDay" Name="Find Hatch Day"/>
+        <Item Id="ToggleLight" Name="Toggle Light"/>
+        <Item Id="ToggleCandler" Name="Toggle Candler"/>
+        <Item Id="IncubationDone" Name="Incubation Done?">
             <MenuItems>
-                <Item Id="SetDays" Name="Incubation Time"/>
+                <Item Id="Confirmation" Name="Are you sure?"/>
             </MenuItems>
         </Item>
     </MenuItems>

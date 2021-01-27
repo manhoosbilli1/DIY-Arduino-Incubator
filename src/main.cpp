@@ -21,20 +21,20 @@ enum AppModeValues
   APP_PROCESS_MENU_CMD
 };
 byte appMode = APP_NORMAL_MODE;
-MenuManager Menu1(sampleMenu_Root, menuCount(sampleMenu_Root));
+MenuManager rtMenu(runtimeMenu_Root, menuCount(runtimeMenu_Root));
 
 char strbuf[LCD_COLS + 1]; // one line of lcd display
 byte btn;
 
 #define MOTORTYPETIMER
-//#define USINHHUMIDIFIER 1
-//#define SENSORMODEBOTH 1
-//#define USINGRTC 1
+//#define USINHHUMIDIFIER
+#define SENSORMODEBOTH
+//#define USINGRTC
 //#define MOTORTYPELIMIT
-//#define HEATERMODERELAY 1
-#define SENSORMODEDHT 1
-//#define SENSORMODEDSB 1
-//#define USINGWATERPUMP 1
+//#define HEATERMODERELAY
+//#define SENSORMODEDHT
+//#define SENSORMODEDSB
+//#define USINGWATERPUMP
 const uint32_t sensorUpdateInterval = 2000;
 
 /*------------Pin definitions----------------*/
@@ -56,10 +56,11 @@ uint8_t waterLevelSensorPin = A7;
 #endif
 
 /*EEPROM ADDRESSED*/
-#define tempAdd 0 //float
-#define humAdd 4  //int
-#define freqAdd 6 //int
-#define daysAdd 8 //int.
+#define tempAdd 0            //float
+#define humAdd 4             //int
+#define freqAdd 6            //int
+#define daysAdd 8            //int.
+#define initialSetupAdd 1023 //this bit will check wether its initial setup or not.
 /*----------Motor controller variables-----------*/
 uint8_t frequency = 8;
 uint32_t turnInterval;
@@ -162,18 +163,18 @@ extern char *lpad(char *dest, const char *str, char chr = ' ', unsigned char wid
 extern char *rpad(char *dest, const char *str, char chr = ' ', unsigned char width = LCD_COLS);
 // Apply string concatenation. argc = number of string arguments to follow.
 extern char *fmt(char *dest, unsigned char argc, ...);
-char *padc (char chr, unsigned char count);
-byte processMenuCommand(byte cmdId);
+char *padc(char chr, unsigned char count);
+
+byte processRuntimeMenuCommand(byte cmdId);
 void refreshMenuDisplay(byte refreshMode);
 byte getNavAction();
-
 
 void setup()
 {
   // put your setup code here, to run once:
   //EEPROM.put(tempAdd,tempSetpoint);
-  appMode = APP_NORMAL_MODE;
-  refreshMenuDisplay(REFRESH_DESCEND);
+  //initial setup check.
+
 #ifdef SENSORMODEDHT
   dht.begin();
 #endif
@@ -215,6 +216,8 @@ void setup()
   //should be called after values are read from EEPROM
   //readFromEEPROM();
   //turnInterval = (24 / frequency) * 3600000;
+  appMode = APP_NORMAL_MODE;
+  refreshMenuDisplay(REFRESH_DESCEND);
 }
 
 void loop()
@@ -238,12 +241,10 @@ void loop()
     break;
   case APP_MENU_MODE:
   {
-    byte menuMode = Menu1.handleNavigation(getNavAction, refreshMenuDisplay);
+    byte menuMode = rtMenu.handleNavigation(getNavAction, refreshMenuDisplay);
 
     if (menuMode == MENU_EXIT)
     {
-      lcd.clear();
-      lcd.print("Hold UP for menu");
       appMode = APP_NORMAL_MODE;
     }
     else if (menuMode == MENU_INVOKE_ITEM)
@@ -251,7 +252,7 @@ void loop()
       appMode = APP_PROCESS_MENU_CMD;
 
       // Indicate selected item.
-      if (Menu1.getCurrentItemCmdId())
+      if (rtMenu.getCurrentItemCmdId())
       {
         lcd.setCursor(0, 1);
         strbuf[0] = 0b01111110; // forward arrow representing input prompt.
@@ -263,7 +264,7 @@ void loop()
   }
   case APP_PROCESS_MENU_CMD:
   {
-    byte processingComplete = processMenuCommand(Menu1.getCurrentItemCmdId());
+    byte processingComplete = processRuntimeMenuCommand(rtMenu.getCurrentItemCmdId());
 
     if (processingComplete)
     {
@@ -279,50 +280,8 @@ void loop()
   }
 }
 
-/* 
-refreshes the switch and buttons states also 
-will only work if on root level. 
-*/
-void updateSwitches()
-{
-  if (!inSubMenu)
-  {
-    DW.read();
-    UP.read();
-    SL.read();
-    if (UP.wasPressed())
-    {
-      if (page != pageMax)
-      {
-        page++;
-      }
-      else
-      {
-        page = pageMin;
-      }
-    }
-    else if (DW.wasPressed())
-    {
-      if (page != pageMin)
-      {
-        page--;
-      }
-      else
-      {
-        page = pageMax;
-      }
-    }
-    if (prevPage != page)
-    {
-      refreshFlag = true;
-      prevPage = page;
-    }
-  }
-}
 /*
-Will update the sensors and also take care 
-of making appropriate correction for 
-humidity. 
+Will update the sensors only
 */
 void updateSensor()
 {
@@ -362,10 +321,12 @@ void updateSensor()
 #endif
   }
 }
+
+//Will apply all kinds of correction from temp to humidity.
 void correction()
 {
 #ifndef HEATERMODERELAY
-  //myPID.Compute();
+  //myPID.Compute();         //don't forget to uncomment in testing.
   //analogWrite(heater, Output);
 #else
   //means using relay.
@@ -374,6 +335,8 @@ void correction()
   else
     digitalWrite(heater, HIGH);
 #endif
+  //TODO: ifndef humidifier then don't fire the alarm as soon as it decreases.
+  //give it sometime. pleasent and good alarm should be there.
 
   //Makes the adjustment to humidifier.
   /*
@@ -458,9 +421,8 @@ Calculates when its time to turn the motors.
 
 bool isTime()
 {
-  if ((currentTime - lastTime) == turnInterval)
+  if ((currentTime - lastTime) >= turnInterval)
   {
-    lastTime = currentTime;
     return true;
   }
   return false;
@@ -476,6 +438,7 @@ void motorHandler()
   static uint8_t currentState = 0;
   if (isTime())
   {
+    lastTime = currentTime;
     is_time = true;
   }
   if (is_time) //runs the motor if its time.
@@ -490,27 +453,27 @@ void motorHandler()
       {
         digitalWrite(motorPinA, HIGH);
         digitalWrite(motorPinB, LOW);     //turn towards any random direction.
-        timer = millis();                 //start the timer
+        timer = currentTime;              //start the timer
         currentState = MOTOR_MOVING_LEFT; //direction is abstract. doesn't matter
       }
       if (prevState == MOTOR_MOVING_LEFT)
       {
         digitalWrite(motorPinA, LOW);
         digitalWrite(motorPinB, HIGH);
-        timer = millis();
+        timer = currentTime;
         currentState = MOTOR_MOVING_RIGHT;
       }
       if (prevState == MOTOR_MOVING_RIGHT)
       {
         digitalWrite(motorPinA, HIGH);
         digitalWrite(motorPinB, LOW);
-        timer = millis();
+        timer = currentTime;
         currentState = MOTOR_MOVING_LEFT;
       }
       break;
 
     case MOTOR_MOVING_LEFT:
-      if (millis() - timer <= turnDelay) //
+      if ((currentTime - timer) <= turnDelay) //
       {
         //wait for the motor to reach the other extreme position
       }
@@ -526,7 +489,7 @@ void motorHandler()
       break;
 
     case MOTOR_MOVING_RIGHT:
-      if (millis() - timer <= turnDelay)
+      if ((currentTime - timer) <= turnDelay)
       {
         //wait for the motor to reach the other extreme position
       }
@@ -546,7 +509,8 @@ void motorHandler()
 #ifdef MOTORTYPELIMIT
   if (isTime())
   {
-    is_time = true; //we catch the flag.
+    lastTime = currentTime; //reset the timer when we call the isTime function and not before that.
+    is_time = true;         //we catch the flag.
   }
   if (is_time)
   {
@@ -637,7 +601,7 @@ bool turnMotorOnce() //if returns true. turning is done.
     break;
 
   case MOTOR_MOVING_LEFT:
-    if (currentTime - timer1 <= turnDelay) //
+    if ((currentTime - timer1) <= turnDelay) //
     {
       //wait for the motor to reach the other extreme position
     }
@@ -652,7 +616,7 @@ bool turnMotorOnce() //if returns true. turning is done.
     break;
 
   case MOTOR_MOVING_RIGHT:
-    if (currentTime - timer1 <= turnDelay)
+    if ((currentTime - timer1) <= turnDelay)
     {
       //wait for the motor to reach the other extreme position
     }
@@ -758,8 +722,7 @@ bool timeOutCheck(const uint32_t delay)
   }
   if ((currentTime - timer) >= delay)
   {
-    page = 0;          //reset to main page. get out of all the level.
-    inSubMenu = false; //so that when you enter next time. it starts from root level.
+    appMode = APP_NORMAL_MODE; //reset to main page. get out of all the level.
     timer = 0;
     firstTime = true; //for next time. turn it on.
     return true;
@@ -792,10 +755,6 @@ void homeMenu()
     lcd.print(humiditySetpoint);
     update_sensor = false;
   }
-}
-
-void menuHandler()
-{
 }
 
 void readFromEEPROM()
@@ -834,6 +793,7 @@ void readFromEEPROM()
   //means the data retreived is corrupt. will resort to default values instead. other wise will load the new values.
 }
 
+/*Polls the switches for latest update*/
 void poll()
 {
   UP.read();
@@ -916,9 +876,9 @@ char *padc(char chr, unsigned char count)
   return strbuf;
 }
 
-byte processMenuCommand(byte cmdId)
+byte processRuntimeMenuCommand(byte cmdId)
 {
-  byte complete = false;  // set to true when menu command processing complete.
+  byte complete = false; // set to true when menu command processing complete.
 
   if (SL.wasPressed())
   {
@@ -928,47 +888,101 @@ byte processMenuCommand(byte cmdId)
   switch (cmdId)
   {
     // TODO Process menu commands here:
-    default:
-      break;
+  case runtimeCmdTurnMotorOnce:
+  if(turnMotorOnce()==true)
+  {
+    complete = true;
+    lcd.setCursor(1,1);
+    lcd.print("              ");
+  }
+  else 
+  {
+    lcd.setCursor(1,1);
+    lcd.print("Turning motor.");
+  }
+    break;
+  case runtimeCmdSetTemp:
+    break;
+  case runtimeCmdSetHum:
+    break;
+  case runtimeCmdSetFreq:
+    break;
+  case runtimeCmdSetTurnDelay:
+    break;
+  case runtimeCmdSetHours:
+    break;
+  case runtimeCmdSetMins:
+    break;
+  case runtimeCmdSetSeconds:
+    break;
+  case runtimeCmdSetYear:
+    break;
+  case runtimeCmdSetMonth:
+    break;
+  case runtimeCmdSetDay:
+    break;
+  case runtimeCmdSetP:
+    break;
+  case runtimeCmdSetI:
+    break;
+  case runtimeCmdSetD:
+    break;
+  case runtimeCmdIncubationTime:
+    break;
+  case runtimeCmdSaveProfile:
+    break;
+  case runtimeCmdShowHatchDay:
+    break;
+  case runtimeCmdCalcHatchDay:
+    break;
+  case runtimeCmdToggleLight:
+    break;
+  case runtimeCmdToggleCandler:
+    break;
+  case runtimeCmdConfirmation:
+    break;
+  default:
+    break;
   }
 
   return complete;
 }
-
 
 //----------------------------------------------------------------------
 // Callback to convert button press to navigation action.
 byte getNavAction()
 {
   byte navAction = 0;
-  byte currentItemHasChildren = Menu1.currentItemHasChildren();
+  byte currentItemHasChildren = rtMenu.currentItemHasChildren();
 
-  if (UP.wasPressed() || UP.pressedFor(1000)) navAction = MENU_ITEM_PREV;
-  else if (DW.wasPressed() || DW.pressedFor(1000)) navAction = MENU_ITEM_NEXT;
-  else if (SL.wasPressed()) navAction = MENU_ITEM_SELECT;
+  if (UP.wasPressed() || UP.pressedFor(1000))
+    navAction = MENU_ITEM_PREV;
+  else if (DW.wasPressed() || DW.pressedFor(1000))
+    navAction = MENU_ITEM_NEXT;
+  else if (SL.wasPressed())
+    navAction = MENU_ITEM_SELECT;
   //else if (btn == BUTTON_LEFT_PRESSED) navAction = MENU_BACK;
   return navAction;
 }
-
 
 //----------------------------------------------------------------------
 const char EmptyStr[] = "";
 
 // Callback to refresh display during menu navigation, using parameter of type enum DisplayRefreshMode.
-void refreshMenuDisplay (byte refreshMode)
+void refreshMenuDisplay(byte refreshMode)
 {
   char nameBuf[LCD_COLS + 1];
 
   /*
     if (refreshMode == REFRESH_DESCEND || refreshMode == REFRESH_ASCEND)
     {
-      byte menuCount = Menu1.getMenuItemCount();
+      byte menuCount = rtMenu.getMenuItemCount();
 
       // uncomment below code to output menus to serial monitor
-      if (Menu1.currentMenuHasParent())
+      if (rtMenu.currentMenuHasParent())
       {
         Serial.print("Parent menu: ");
-        Serial.println(Menu1.getParentItemName(nameBuf));
+        Serial.println(rtMenu.getParentItemName(nameBuf));
       }
       else
       {
@@ -977,9 +991,9 @@ void refreshMenuDisplay (byte refreshMode)
 
       for (int i=0; i<menuCount; i++)
       {
-        Serial.print(Menu1.getItemName(nameBuf, i));
+        Serial.print(rtMenu.getItemName(nameBuf, i));
 
-        if (Menu1.itemHasChildren(i))
+        if (rtMenu.itemHasChildren(i))
         {
           Serial.println("->");
         }
@@ -992,25 +1006,25 @@ void refreshMenuDisplay (byte refreshMode)
   */
 
   lcd.setCursor(0, 0);
-  if (Menu1.currentItemHasChildren())
+  if (rtMenu.currentItemHasChildren())
   {
-    rpad(strbuf, Menu1.getCurrentItemName(nameBuf));
-    strbuf[LCD_COLS - 1] = 0b01111110;          // Display forward arrow if this menu item has children.
+    rpad(strbuf, rtMenu.getCurrentItemName(nameBuf));
+    strbuf[LCD_COLS - 1] = 0b01111110; // Display forward arrow if this menu item has children.
     lcd.print(strbuf);
     lcd.setCursor(0, 1);
-    lcd.print(rpad(strbuf, EmptyStr));          // Clear config value in display
+    lcd.print(rpad(strbuf, EmptyStr)); // Clear config value in display
   }
   else
   {
     byte cmdId;
-    rpad(strbuf, Menu1.getCurrentItemName(nameBuf));
+    rpad(strbuf, rtMenu.getCurrentItemName(nameBuf));
 
-    if ((cmdId = Menu1.getCurrentItemCmdId()) == 0)
+    if ((cmdId = rtMenu.getCurrentItemCmdId()) == 0)
     {
-      strbuf[LCD_COLS - 1] = 0b01111111;        // Display back arrow if this menu item ascends to parent.
+      strbuf[LCD_COLS - 1] = 0b01111111; // Display back arrow if this menu item ascends to parent.
       lcd.print(strbuf);
       lcd.setCursor(0, 1);
-      lcd.print(rpad(strbuf, EmptyStr));        // Clear config value in display.
+      lcd.print(rpad(strbuf, EmptyStr)); // Clear config value in display.
     }
     else
     {
@@ -1022,3 +1036,6 @@ void refreshMenuDisplay (byte refreshMode)
     }
   }
 }
+
+//alarm on lockdown day to notify the user that its time.
+//print a pdf with all the pre incubation and post incubation instructions. and include it with the incubator

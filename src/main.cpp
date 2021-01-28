@@ -28,11 +28,11 @@ byte btn;
 
 #define MOTORTYPETIMER
 //#define USINHHUMIDIFIER
-#define SENSORMODEBOTH
+//#define SENSORMODEBOTH
 //#define USINGRTC
 //#define MOTORTYPELIMIT
 //#define HEATERMODERELAY
-//#define SENSORMODEDHT
+#define SENSORMODEDHT
 //#define SENSORMODEDSB
 //#define USINGWATERPUMP
 const uint32_t sensorUpdateInterval = 2000;
@@ -54,17 +54,7 @@ const byte pinUp(9), pinDw(4), pinSl(5);
 #ifdef USINGWATERPUMP
 uint8_t waterLevelSensorPin = A7;
 #endif
-
-/*EEPROM ADDRESSED*/
-#define tempAdd 0            //float
-#define humAdd 4             //int
-#define freqAdd 6            //int
-#define daysAdd 8            //int.
-#define initialSetupAdd 1023 //this bit will check wether its initial setup or not.
 /*----------Motor controller variables-----------*/
-uint8_t frequency = 8;
-uint32_t turnInterval;
-uint32_t turnDelay = 5000;
 uint32_t lastTime = 0;
 bool is_time = false;
 #define MOTOR_IDLE 0
@@ -78,12 +68,7 @@ uint8_t waterMaxLimit;
 #endif
 #ifndef HEATERMODERELAY
 double Output;
-double Kp = 10;
-double Ki = 5;
-double Kd = 1.8;
 #endif
-double tempSetpoint = 28.71;
-uint8_t humiditySetpoint = 60;
 double currentTemp;
 double f;
 double t;
@@ -92,28 +77,30 @@ double curTemp;
 uint32_t currentTime = 0;
 uint32_t prevTime1 = 0;
 uint8_t prevCounter;
-#define counterMax 5
-#define counterMin 0
-uint8_t daysToHatch = 21;
 uint8_t turnCounter;
 uint8_t prevState;
-uint8_t pageMax = 5;
-uint8_t pageMin = 0;
-uint8_t prevPage = 0;
-uint8_t page = 0;
-bool inMenu = 0;
-bool inSubMenu = 0;
-bool pressed = 1;
 bool update_sensor = 0;
-bool refreshFlag = true;
-bool refreshFlag1 = true;
-#define home 0
-#define page1 1
-#define page2 2
-#define page3 3
-#define page4 4
-#define ROOT 0
-volatile bool upState, dwState, slState;
+
+double tempSetpoint = 37.5;
+uint8_t humiditySetpoint = 60;
+uint8_t frequency = 8;
+uint8_t turnDelay = 2; //in seconds
+uint8_t daysToHatch = 21;
+uint8_t incubationPeriod = 21;
+uint32_t turnInterval = 5000;
+double Kp = 10;
+double Ki = 5;
+double Kd = 1.8;
+//Addresses
+#define tempAdd 0
+#define humAdd 4
+#define freqAdd 8
+#define turnDelayAdd 12
+#define incubationPAdd 16
+#define pAdd 20
+#define iAdd 24
+#define dAdd 28
+
 //------------OBJECT initialization------------
 #ifdef SENSORMODEDHT
 DHT dht(DHTPIN, DHTTYPE);
@@ -156,6 +143,9 @@ bool turnMotorOnce();
 void updateSensor();
 void homeMenu();
 void poll();
+bool editValue(int add, double &value, double incBy);
+bool editValue(int add, uint8_t &value, uint8_t incBy);
+bool editValue(int add, uint32_t &value, uint8_t incBy);
 extern char *inttostr(char *dest, short integer);
 // Apply left padding to string.
 extern char *lpad(char *dest, const char *str, char chr = ' ', unsigned char width = LCD_COLS);
@@ -216,6 +206,7 @@ void setup()
   //should be called after values are read from EEPROM
   //readFromEEPROM();
   //turnInterval = (24 / frequency) * 3600000;
+  readFromEEPROM();
   appMode = APP_NORMAL_MODE;
   refreshMenuDisplay(REFRESH_DESCEND);
 }
@@ -246,6 +237,8 @@ void loop()
     if (menuMode == MENU_EXIT)
     {
       appMode = APP_NORMAL_MODE;
+      myPID.SetTunings(Kp, Ki, Kd);
+      //should also save any other config settings here.
     }
     else if (menuMode == MENU_INVOKE_ITEM)
     {
@@ -686,26 +679,6 @@ return false;
 }
 
 /*
-This can be used in every menu part where parameters have to be changed. 
-this takes a variable and when you press select. it modifies that variable. 
-TODO: still need to save it to the EEPROM. 
-*/
-
-void buttonListener(uint8_t &counter) //passing values by reference.
-{
-  static uint8_t count = 0;
-  if (UP.wasPressed()) //this should modify the variables address directly.
-    count++;
-  if (DW.wasPressed())
-    count--;
-  if (SL.wasPressed())
-  {
-    counter = count;
-    count = 0;
-  }
-}
-
-/*
 Checks if the menu is not being used.
 it will discard the changes and jump back
 to homepage. 
@@ -748,49 +721,8 @@ void homeMenu()
     lcd.setCursor(9, 0);
     lcd.print("H:");
     lcd.print(h);
-    lcd.setCursor(0, 1);
-    lcd.print("TS:");
-    lcd.print(tempSetpoint);
-    lcd.setCursor(9, 1);
-    lcd.print(humiditySetpoint);
     update_sensor = false;
   }
-}
-
-void readFromEEPROM()
-{
-
-  double tempSetpointTemp;
-  int frequencyTemp;
-  int humiditySetpointTemp;
-  EEPROM.get(tempAdd, tempSetpointTemp);
-  EEPROM.get(humAdd, humiditySetpointTemp);
-  EEPROM.get(freqAdd, frequencyTemp);
-  if (tempSetpointTemp <= 20 || tempSetpointTemp >= 50 || tempSetpointTemp == NAN)
-  {
-    EEPROM.put(tempAdd, tempSetpoint);
-  }
-  else
-  {
-    tempSetpoint = tempSetpointTemp;
-  }
-  if (humiditySetpointTemp <= 20 || humiditySetpointTemp >= 90)
-  {
-    EEPROM.put(humAdd, humiditySetpoint);
-  }
-  else
-  {
-    humiditySetpoint = humiditySetpointTemp;
-  }
-  if (frequencyTemp <= 1 || frequencyTemp >= 48)
-  {
-    EEPROM.put(freqAdd, frequency);
-  }
-  else
-  {
-    frequency = frequencyTemp;
-  }
-  //means the data retreived is corrupt. will resort to default values instead. other wise will load the new values.
 }
 
 /*Polls the switches for latest update*/
@@ -879,7 +811,6 @@ char *padc(char chr, unsigned char count)
 byte processRuntimeMenuCommand(byte cmdId)
 {
   byte complete = false; // set to true when menu command processing complete.
-
   if (SL.wasPressed())
   {
     complete = true;
@@ -889,25 +820,106 @@ byte processRuntimeMenuCommand(byte cmdId)
   {
     // TODO Process menu commands here:
   case runtimeCmdTurnMotorOnce:
-  if(turnMotorOnce()==true)
-  {
-    complete = true;
-    lcd.setCursor(1,1);
-    lcd.print("              ");
-  }
-  else 
-  {
-    lcd.setCursor(1,1);
-    lcd.print("Turning motor.");
-  }
+    if (turnMotorOnce() == true)
+    {
+      complete = true;
+      lcd.setCursor(1, 1);
+      lcd.print("              ");
+    }
+    else
+    {
+      lcd.setCursor(1, 1);
+      lcd.print("Turning motor.");
+    }
     break;
+
   case runtimeCmdSetTemp:
+    static double tmp = tempSetpoint;
+    lcd.setCursor(1, 1);
+    lcd.print(tmp);
+    if (UP.wasPressed())
+    {
+      tmp = tmp + 0.5;
+    }
+    else if (DW.wasPressed())
+    {
+      tmp = tmp - 0.5;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      tempSetpoint = tmp;
+      EEPROM.put(tempAdd, tempSetpoint);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSetHum:
+    static uint8_t hum = humiditySetpoint;
+    lcd.setCursor(1, 1);
+    lcd.print(hum);
+    if (UP.wasPressed())
+    {
+      hum = hum + 5;
+    }
+    else if (DW.wasPressed())
+    {
+      hum = hum - 5;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      humiditySetpoint = hum;
+      EEPROM.put(humAdd, humiditySetpoint);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSetFreq:
+    static uint8_t frq = frequency;
+    lcd.setCursor(1, 1);
+    lcd.print(frq);
+    if (UP.wasPressed())
+    {
+      frq = frq + 1;
+    }
+    else if (DW.wasPressed())
+    {
+      frq = frq - 1;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      frequency = frq;
+      EEPROM.put(freqAdd, frequency);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSetTurnDelay:
+    static uint8_t td = turnDelay;
+    lcd.setCursor(1, 1);
+    lcd.print(td);
+    if (UP.wasPressed())
+    {
+      td = td + 1;
+    }
+    else if (DW.wasPressed())
+    {
+      td = td - 1;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      turnDelay = td;
+      EEPROM.put(turnDelayAdd, turnDelay);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSetHours:
     break;
@@ -922,12 +934,92 @@ byte processRuntimeMenuCommand(byte cmdId)
   case runtimeCmdSetDay:
     break;
   case runtimeCmdSetP:
+    static double p = Kp;
+    lcd.setCursor(1, 1);
+    lcd.print(p);
+    if (UP.wasPressed())
+    {
+      p = p + 0.1;
+    }
+    else if (DW.wasPressed())
+    {
+      p = p - 0.1;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      Kp = p;
+      EEPROM.put(pAdd, Kp);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSetI:
+    static double i = Ki;
+    lcd.setCursor(1, 1);
+    lcd.print(i);
+    if (UP.wasPressed())
+    {
+      i = i + 0.1;
+    }
+    else if (DW.wasPressed())
+    {
+      i = i - 0.1;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      Ki = i;
+      EEPROM.put(iAdd, Ki);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSetD:
+    static double d = Kd;
+    lcd.setCursor(1, 1);
+    lcd.print(d);
+    if (UP.wasPressed())
+    {
+      d = d + 0.1;
+    }
+    else if (DW.wasPressed())
+    {
+      d = d - 0.1;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      Kd = d;
+      EEPROM.put(dAdd, Kd);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdIncubationTime:
+    static uint8_t it = incubationPeriod;
+    lcd.setCursor(1, 1);
+    lcd.print(it);
+    if (UP.wasPressed())
+    {
+      it = it + 0.1;
+    }
+    else if (DW.wasPressed())
+    {
+      it = it - 0.1;
+    }
+    if (SL.wasPressed())
+    {
+      //will not longer save individual values instead will save the whole config.
+      incubationPeriod = it;
+      EEPROM.put(incubationPAdd, incubationPeriod);
+      lcd.setCursor(1, 1);
+      lcd.print("               ");
+      complete = true;
+    }
     break;
   case runtimeCmdSaveProfile:
     break;
@@ -1039,3 +1131,15 @@ void refreshMenuDisplay(byte refreshMode)
 
 //alarm on lockdown day to notify the user that its time.
 //print a pdf with all the pre incubation and post incubation instructions. and include it with the incubator
+
+void readFromEEPROM()
+{
+  EEPROM.get(tempAdd, tempSetpoint);
+  EEPROM.get(humAdd, humiditySetpoint);
+  EEPROM.get(freqAdd, frequency);
+  EEPROM.get(turnDelayAdd, turnDelay);
+  EEPROM.get(pAdd, Kp);
+  EEPROM.get(iAdd, Ki);
+  EEPROM.get(dAdd, Kd);
+  EEPROM.get(incubationPAdd, incubationPeriod);
+}

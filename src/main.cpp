@@ -10,9 +10,27 @@
 #include <JC_Button.h>
 #include <EEPROM.h>
 #include "MenuData.h"
-
 #define LCD_ROWS 2
 #define LCD_COLS 16
+
+//base configuration struct to store all the modifiable values related to incubator
+#define CONFIG_VERSION "chicken V1"
+typedef struct
+{
+  double tempSetpoint;
+  uint8_t humiditySetpoint;
+  uint8_t frequency;
+  uint8_t turnDelay; //in seconds
+  uint8_t daysToHatch;
+  uint8_t incubationPeriod;
+  uint32_t turnInterval;
+  double Kp;
+  double Ki;
+  double Kd;
+  uint8_t eggType;
+  char version[sizeof(CONFIG_VERSION)];
+
+} config;
 
 enum AppModeValues
 {
@@ -44,6 +62,7 @@ const uint32_t sensorUpdateInterval = 2000;
 #define uint8_t limitSw1 = 10;
 #define uint8_t limitSw2 = 9;
 #endif
+//IF USING DSB18B20 CHANGE, OTHERWISE LEAVE IT AS IT IS.
 #define ONE_WIRE_BUS 8
 #define DHTPIN 7
 #define DHTTYPE DHT22
@@ -80,8 +99,9 @@ uint8_t prevCounter;
 uint8_t turnCounter;
 uint8_t prevState;
 bool update_sensor = 0;
-
-double tempSetpoint = 37.5;
+uint8_t eggType = 0;
+#define CHICKEN 1
+double tempSetpoint = 37.5; //this set of variables are unnecessary. might delete it after im done testing this eeprom manager.
 uint8_t humiditySetpoint = 60;
 uint8_t frequency = 8;
 uint8_t turnDelay = 2; //in seconds
@@ -91,6 +111,41 @@ uint32_t turnInterval = 5000;
 double Kp = 10;
 double Ki = 5;
 double Kd = 1.8;
+uint8_t incubationStart = 255;
+
+config defaultConfig = { //settings default values
+    tempSetpoint,
+    humiditySetpoint,
+    frequency,
+    turnDelay,
+    daysToHatch,
+    incubationPeriod,
+    turnInterval,
+    Kp,
+    Ki,
+    Kd,
+    eggType,
+    CONFIG_VERSION};
+
+config chickenConfig = {
+  37.5,
+  60,
+  8,
+  2,
+  21,
+  21,
+  
+  10,
+  5,
+  3,
+  CHICKEN,
+  CONFIG_VERSION
+};
+
+#define chickenConfigAdd 50
+#define customConfigAdd1 150
+#define customConfigAdd2 250
+
 //Addresses
 #define tempAdd 0
 #define humAdd 4
@@ -100,6 +155,10 @@ double Kd = 1.8;
 #define pAdd 20
 #define iAdd 24
 #define dAdd 28
+#define firstSetupAdd 500      //if this byte is 0xff or 255 in decimal its a fresh start otherwise this incubator has been programmed before. 
+                               //should help out in setup when im asking the users a couple of questions. wouldn't need to repeat if i know  
+                               //if it is infact their first time operating the incubator.
+#define incubationStartAdd 499 //if this byte is high means incubation is on going. otherwise it hasn't begun yet.
 
 //------------OBJECT initialization------------
 #ifdef SENSORMODEDHT
@@ -132,20 +191,20 @@ RTC_DS3231 rtc;
 #endif
 
 /*------------function declarations--------------*/
+void firstTimeSetup();
 bool isTime();
 void motorHandler();
-void updateSwitches();
 void updateMenu();
 void correction();
-void menuHandler();
 void readFromEEPROM();
 bool turnMotorOnce();
 void updateSensor();
 void homeMenu();
 void poll();
+void loadConfig(int add);
+void saveConfig(int add, config myConfig);
 bool editValue(int add, double &value, double incBy);
 bool editValue(int add, uint8_t &value, uint8_t incBy);
-bool editValue(int add, uint32_t &value, uint8_t incBy);
 extern char *inttostr(char *dest, short integer);
 // Apply left padding to string.
 extern char *lpad(char *dest, const char *str, char chr = ' ', unsigned char width = LCD_COLS);
@@ -184,9 +243,10 @@ void setup()
   DW.begin();
   UP.begin();
   SL.begin();
+  firstTimeSetup(); //will entirely depends wether that one byte in eeprom. if its 255 meaning its first time. otherwise directly jump into loop
 #ifndef HEATERMODERELAY
-//  myPID.SetMode(AUTOMATIC);
-//  myPID.SetSampleTime(2300); //2.3 seconds
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetSampleTime(2300); //2.3 seconds because of slow sensors
 #endif
 #ifdef USINGRTC
   if (!rtc.begin()) //make it print to lcd if this happens
@@ -207,6 +267,10 @@ void setup()
   //readFromEEPROM();
   //turnInterval = (24 / frequency) * 3600000;
   readFromEEPROM();
+  if (incubationStart == true && eggType == CHICKEN)
+  {
+    loadConfig(chickenConfigAdd);
+  }
   appMode = APP_NORMAL_MODE;
   refreshMenuDisplay(REFRESH_DESCEND);
 }
@@ -219,7 +283,6 @@ void loop()
   updateSensor();
   //correction();
   //motorHandler();
-  homeMenu();
   switch (appMode)
   {
   case APP_NORMAL_MODE:
@@ -229,6 +292,10 @@ void loop()
       appMode = APP_MENU_MODE;
       refreshMenuDisplay(REFRESH_DESCEND);
     }
+    else
+    {
+      homeMenu();
+    }
     break;
   case APP_MENU_MODE:
   {
@@ -237,7 +304,6 @@ void loop()
     if (menuMode == MENU_EXIT)
     {
       appMode = APP_NORMAL_MODE;
-      myPID.SetTunings(Kp, Ki, Kd);
       //should also save any other config settings here.
     }
     else if (menuMode == MENU_INVOKE_ITEM)
@@ -272,6 +338,8 @@ void loop()
   }
   }
 }
+
+//--------------------FUNCTIONS------------------
 
 /*
 Will update the sensors only
@@ -319,20 +387,20 @@ void updateSensor()
 void correction()
 {
 #ifndef HEATERMODERELAY
-  //myPID.Compute();         //don't forget to uncomment in testing.
-  //analogWrite(heater, Output);
+  myPID.Compute(); //don't forget to uncomment in testing.
+  analogWrite(heater, Output);
 #else
   //means using relay.
-  if (Input >= Setpoint)
+  if (Input > tempSetpoint)
     digitalWrite(heater, LOW);
-  else
+  else if (Input < tempSetpoint)
     digitalWrite(heater, HIGH);
 #endif
   //TODO: ifndef humidifier then don't fire the alarm as soon as it decreases.
   //give it sometime. pleasent and good alarm should be there.
+  //build support for generic thermistor type temperature sensor.
 
   //Makes the adjustment to humidifier.
-  /*
 #if defined(SENSORMODEDHT) || defined(SENSORMODEBOTH)
 
   if (h > humiditySetpoint)
@@ -345,6 +413,7 @@ void correction()
   else
     digitalWrite(dehumFan, LOW); //turn off dehum fine to retain humidity
 
+//not tested yet.
 #ifdef USINGWATERPUMP
   if (analogRead(waterLevelSensor) < (waterMinLimit))
   {
@@ -372,7 +441,7 @@ void correction()
         }
         break;
 
-      case 1: //makes sure it wasn't just some wind or sensor noise.
+      case 1: //makes sure it wasn't just some wind or sensor noise. by waiting 2 minutes
         if(((currentTime - humTimer) >= 120000) && (prevHum - h >0)) //if still falling. 
         {
       correctionTimer = millis(); //record the timer for next case.
@@ -405,7 +474,6 @@ void correction()
   }
 #endif
 #endif
-*/
 }
 
 /*
@@ -721,6 +789,10 @@ void homeMenu()
     lcd.setCursor(9, 0);
     lcd.print("H:");
     lcd.print(h);
+    lcd.setCursor(0, 1);
+    lcd.print(defaultConfig.incubationPeriod);
+    lcd.print(" ");
+    lcd.print(defaultConfig.version);
     update_sensor = false;
   }
 }
@@ -811,7 +883,7 @@ char *padc(char chr, unsigned char count)
 byte processRuntimeMenuCommand(byte cmdId)
 {
   byte complete = false; // set to true when menu command processing complete.
-  if (SL.wasPressed())
+  if (SL.pressedFor(5000))
   {
     complete = true;
   }
@@ -880,6 +952,10 @@ byte processRuntimeMenuCommand(byte cmdId)
   case runtimeCmdToggleCandler:
     break;
   case runtimeCmdConfirmation:
+    //TODO. save all settings here or maybe make a new profile at a different eeprom address.
+#ifndef HEATERMODERELAY
+    myPID.SetTunings(Kp, Ki, Kd);
+#endif
     break;
   default:
     break;
@@ -1064,4 +1140,133 @@ bool editValue(int add, double &value, double incBy)
   {
     return false;
   }
+}
+
+void firstTimeSetup()
+{
+  uint8_t value = 0;
+  EEPROM.get(firstSetupAdd, value);
+  if (value != 0) //if value != 0 meaning this address has been written to before. so assume its not first setup and return.
+  {
+    return;
+  }
+  else
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("  Welcome to  ");
+    lcd.setCursor(0, 1);
+    lcd.print(" DIY incubator! ");
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Press Select to");
+    lcd.setCursor(0, 1);
+    lcd.print("Start new Hatch");
+    delay(5000);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Or..Press Down");
+    lcd.setCursor(0, 1);
+    lcd.print("For 'Not Now'");
+    delay(5000);
+    lcd.clear();
+    bool setupDone = false;
+    uint32_t timer = millis();
+    do
+    {
+      lcd.setCursor(0, 0);
+      lcd.print(">UP to start");
+      lcd.setCursor(0, 1);
+      lcd.print(">Down for later");
+      poll();
+      if (UP.wasPressed())
+      {
+        incubationStart = true;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("SELECT EGGS    ");
+        delay(2000);
+        incubationStart = true;
+        value = 255;
+        EEPROM.put(firstSetupAdd, value); //value just has to be above 0. actual value doesn't matter.
+        setupDone = true;
+      }
+      else if (DW.wasPressed())
+      {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Going to");
+        lcd.setCursor(0, 1);
+        lcd.print("Home Page...");
+        delay(2000);
+        incubationStart = false;
+        value = 255; //not first setup anymore.
+        EEPROM.put(firstSetupAdd, value);
+        setupDone = true;
+      }
+      else if ((millis() - timer) >= 10000) //if in 10 seconds no input assume no hatch needs to be done.
+      {
+        //load in chicken config.
+        lcd.clear();
+        lcd.print("Going to");
+        lcd.setCursor(0, 1);
+        lcd.print("Home Page...");
+        delay(2000);
+        incubationStart = false;
+        setupDone = true;
+      }
+    } while (setupDone == false);
+
+    setupDone = false;
+
+    if (incubationStart == true)
+    {
+      timer = millis();
+      lcd.clear();
+      do
+      {
+        lcd.setCursor(0, 0);
+        lcd.print("Chicken [UP]");
+        lcd.setCursor(0, 1);
+        lcd.print("Other [DW] ");
+        poll();
+        if ((millis() - timer) >= 10000)
+        {
+          incubationStart = false;
+          setupDone = true;
+        }
+        else if (SL.wasPressed())
+        {
+          incubationStart = true;
+          loadConfig(chickenConfigAdd);                    //will load chicken config into default/current config.
+          EEPROM.put(incubationStartAdd, incubationStart); //in order to remember it.
+          setupDone = true;
+        }
+        else if (DW.wasPressed())
+        {
+          incubationStart = false;
+          setupDone = true;
+        }
+
+      } while (setupDone == false);
+    }
+  }
+}
+
+void loadConfig(int add) //just need to pass one of the above addresses where configurations are stored.
+{
+  char ver[sizeof(CONFIG_VERSION)];
+
+  EEPROM.get((add + sizeof(defaultConfig) - sizeof(defaultConfig.version)), ver);
+  if (strcmp(ver, defaultConfig.version) == 0)
+  {
+    EEPROM.get(add, defaultConfig);
+  }
+  //else by default use the values declared above
+}
+
+void saveConfig(int add, config myConfig)
+{
+  EEPROM.put(add, myConfig);
 }

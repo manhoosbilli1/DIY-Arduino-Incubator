@@ -834,92 +834,16 @@ byte processRuntimeMenuCommand(byte cmdId)
     break;
 
   case runtimeCmdSetTemp:
-    static double tmp = tempSetpoint;
-    lcd.setCursor(1, 1);
-    lcd.print(tmp);
-    if (UP.wasPressed())
-    {
-      tmp = tmp + 0.5;
-    }
-    else if (DW.wasPressed())
-    {
-      tmp = tmp - 0.5;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      tempSetpoint = tmp;
-      EEPROM.put(tempAdd, tempSetpoint);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(tempAdd, tempSetpoint, 0.5);
     break;
   case runtimeCmdSetHum:
-    static uint8_t hum = humiditySetpoint;
-    lcd.setCursor(1, 1);
-    lcd.print(hum);
-    if (UP.wasPressed())
-    {
-      hum = hum + 5;
-    }
-    else if (DW.wasPressed())
-    {
-      hum = hum - 5;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      humiditySetpoint = hum;
-      EEPROM.put(humAdd, humiditySetpoint);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(humAdd, humiditySetpoint, 1);
     break;
   case runtimeCmdSetFreq:
-    static uint8_t frq = frequency;
-    lcd.setCursor(1, 1);
-    lcd.print(frq);
-    if (UP.wasPressed())
-    {
-      frq = frq + 1;
-    }
-    else if (DW.wasPressed())
-    {
-      frq = frq - 1;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      frequency = frq;
-      EEPROM.put(freqAdd, frequency);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(freqAdd, frequency, 1);
     break;
   case runtimeCmdSetTurnDelay:
-    static uint8_t td = turnDelay;
-    lcd.setCursor(1, 1);
-    lcd.print(td);
-    if (UP.wasPressed())
-    {
-      td = td + 1;
-    }
-    else if (DW.wasPressed())
-    {
-      td = td - 1;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      turnDelay = td;
-      EEPROM.put(turnDelayAdd, turnDelay);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(turnDelayAdd, turnDelay, 1);
     break;
   case runtimeCmdSetHours:
     break;
@@ -934,92 +858,16 @@ byte processRuntimeMenuCommand(byte cmdId)
   case runtimeCmdSetDay:
     break;
   case runtimeCmdSetP:
-    static double p = Kp;
-    lcd.setCursor(1, 1);
-    lcd.print(p);
-    if (UP.wasPressed())
-    {
-      p = p + 0.1;
-    }
-    else if (DW.wasPressed())
-    {
-      p = p - 0.1;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      Kp = p;
-      EEPROM.put(pAdd, Kp);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(pAdd, Kp, 0.1);
     break;
   case runtimeCmdSetI:
-    static double i = Ki;
-    lcd.setCursor(1, 1);
-    lcd.print(i);
-    if (UP.wasPressed())
-    {
-      i = i + 0.1;
-    }
-    else if (DW.wasPressed())
-    {
-      i = i - 0.1;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      Ki = i;
-      EEPROM.put(iAdd, Ki);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(iAdd, Ki, 0.1);
     break;
   case runtimeCmdSetD:
-    static double d = Kd;
-    lcd.setCursor(1, 1);
-    lcd.print(d);
-    if (UP.wasPressed())
-    {
-      d = d + 0.1;
-    }
-    else if (DW.wasPressed())
-    {
-      d = d - 0.1;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      Kd = d;
-      EEPROM.put(dAdd, Kd);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(dAdd, Kd, 0.1);
     break;
   case runtimeCmdIncubationTime:
-    static uint8_t it = incubationPeriod;
-    lcd.setCursor(1, 1);
-    lcd.print(it);
-    if (UP.wasPressed())
-    {
-      it = it + 0.1;
-    }
-    else if (DW.wasPressed())
-    {
-      it = it - 0.1;
-    }
-    if (SL.wasPressed())
-    {
-      //will not longer save individual values instead will save the whole config.
-      incubationPeriod = it;
-      EEPROM.put(incubationPAdd, incubationPeriod);
-      lcd.setCursor(1, 1);
-      lcd.print("               ");
-      complete = true;
-    }
+    complete = editValue(incubationPAdd, incubationPeriod, 1);
     break;
   case runtimeCmdSaveProfile:
     break;
@@ -1142,4 +990,78 @@ void readFromEEPROM()
   EEPROM.get(iAdd, Ki);
   EEPROM.get(dAdd, Kd);
   EEPROM.get(incubationPAdd, incubationPeriod);
+}
+
+bool editValue(int add, uint8_t &value, uint8_t incBy)
+{
+  lcd.setCursor(1, 1);
+  lcd.print(value);
+  if (UP.wasPressed())
+  {
+    value = value + incBy;
+    lcd.setCursor(1, 1);
+    lcd.print("     ");
+  }
+
+  if (DW.wasPressed())
+  {
+
+    if (value != 0)
+    {
+      value = value - incBy;
+      lcd.setCursor(1, 1);
+      lcd.print("     ");
+    }
+  }
+  if (SL.wasPressed())
+  {
+    lcd.setCursor(1, 1);
+    lcd.print("Saving...");
+    EEPROM.put(add, value);
+    delay(500);
+    lcd.setCursor(1, 1);
+    lcd.print("          ");
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+bool editValue(int add, double &value, double incBy)
+{
+  lcd.setCursor(1, 1);
+  lcd.print(value);
+  if (UP.wasPressed())
+  {
+    value = value + incBy;
+    lcd.setCursor(1, 1);
+    lcd.print("     ");
+  }
+
+  if (DW.wasPressed())
+  {
+
+    if (value != 0)
+    {
+      value = value - incBy;
+      lcd.setCursor(1, 1);
+      lcd.print("     ");
+    }
+  }
+  if (SL.wasPressed())
+  {
+    lcd.setCursor(1, 1);
+    lcd.print("Saving...");
+    EEPROM.put(add, value);
+    delay(500);
+    lcd.setCursor(1, 1);
+    lcd.print("          ");
+    return true;
+  }
+  else
+  {
+    return false;
+  }
 }

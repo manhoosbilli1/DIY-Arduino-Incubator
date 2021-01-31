@@ -4,10 +4,8 @@
 #include <avr/pgmspace.h>
 
 /*
-
 Generated using LCD Menu Builder at https://lcd-menu-bulder.cohesivecomputing.co.uk/
 For more information, visit https://www.cohesivecomputing.co.uk/hackatronics/arduino-lcd-menu-library/
-
 All our hackatronics projects are free for personal use. If you find them helpful or useful, please consider
 making a small donation to our hackatronics fund using the donate buttons on our web pages. Thank you.
 		
@@ -170,6 +168,5 @@ case runtimeCmdConfirmation :
         </Item>
     </MenuItems>
 </RootMenu>
-
 */
 #endif

@@ -4,7 +4,7 @@
     <MenuItems>
         <Item Id="AdvancedSetup" Name="Advanced Setup">
             <MenuItems>
-            <Item Id="TurnMotorOnce" Name="Turn Motor Once"/>
+                <Item Id="TurnMotorOnce" Name="Turn Motor Once"/>
                 <Item Id="SetTemp" Name="Temp SetPoint"/>
                 <Item Id="SetHum" Name="Hum SetPoint"/>
                 <Item Id="SetFreq" Name="Turns per day"/>

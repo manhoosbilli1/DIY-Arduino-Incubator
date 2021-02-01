@@ -14,23 +14,111 @@
 #define LCD_COLS 16
 
 //base configuration struct to store all the modifiable values related to incubator
-#define CONFIG_VERSION "chicken V1"
+#define CONFIG_VERSION "incubator V1"
+
+//some definitions for easily calling the lcd characters.
+//8 character is the limit.
+#define tick 0
+#define time 1
+#define motor 2
+#define memory 3
+#define sensor 4
+#define alarm 5
+byte tickChar[] = {
+    B11111,
+    B11111,
+    B11111,
+    B11110,
+    B11101,
+    B01011,
+    B10111,
+    B11111};
+
+byte timeChar[] = {
+    B11111,
+    B11111,
+    B00100,
+    B00100,
+    B00100,
+    B00100,
+    B00100,
+    B00100};
+
+byte motorIcon[] = {
+    B00000,
+    B10001,
+    B11011,
+    B10101,
+    B10001,
+    B10001,
+    B10001,
+    B00000};
+
+byte memoryIcon[] = {
+    B01110,
+    B01110,
+    B10001,
+    B11000,
+    B00110,
+    B00001,
+    B11101,
+    B11110};
+
+byte sensorIcon[] = {
+    B01110,
+    B01010,
+    B01010,
+    B01010,
+    B01010,
+    B01010,
+    B11111,
+    B11111};
+
+typedef struct
+{
+  uint8_t turnDelay;    //in seconds
+  uint8_t turnInterval; //in seconds
+  double Kp;
+  double Ki;
+  double Kd;
+  char version[sizeof(CONFIG_VERSION)]; //this is needed always to check for the integrity of data received.
+} incubatorConfig;
+
+typedef struct
+{
+  uint8_t daysToHatch;
+  uint8_t firstSetup;
+  uint8_t incubationInProgress;
+  uint8_t incubationStartDay;
+  uint8_t incubationStartMonth;
+  uint8_t incubationStartYear;
+  uint8_t eggType;
+  char version[sizeof(CONFIG_VERSION)]; //this is needed always to check for the integrity of data received.
+} incubatorStatus;
+
 typedef struct
 {
   double tempSetpoint;
   uint8_t humiditySetpoint;
   uint8_t frequency;
-  uint8_t turnDelay; //in seconds
-  uint8_t daysToHatch;
   uint8_t incubationPeriod;
-  uint32_t turnInterval;
-  double Kp;
-  double Ki;
-  double Kd;
-  uint8_t eggType;
-  char version[sizeof(CONFIG_VERSION)];
+  uint8_t lockdownDay;
+  double lockdownTemp;
+  uint8_t lockdownHum;
+  char version[sizeof(CONFIG_VERSION)]; //this is needed always to check for the integrity of data received. in this case to check wether we have loaded the correct egg type
+                                        //configuration by comparing its name with prestored names.
 
-} config;
+} eggConfig;
+
+//CREATING ERROR ENUM IS ALSO USEFUL FOR HANDLING ERRORS IN SWITCH CASE LATER.
+enum ERRORVALUES
+{
+  NOERROR,
+  VERCHECKERROR,
+  SENSORERROR,
+  SAVEFAILED,
+  RTCFAILED
+} ERROR;
 
 enum AppModeValues
 {
@@ -47,7 +135,7 @@ byte btn;
 #define MOTORTYPETIMER
 //#define USINHHUMIDIFIER
 //#define SENSORMODEBOTH
-//#define USINGRTC
+#define USINGRTC
 //#define MOTORTYPELIMIT
 //#define HEATERMODERELAY
 #define SENSORMODEDHT
@@ -99,54 +187,87 @@ uint8_t prevCounter;
 uint8_t turnCounter;
 uint8_t prevState;
 bool update_sensor = 0;
-uint8_t eggType = 0;
+#define EDITED 255  //255 should be written to a byte in eeprom after its written to. NOTE: it will only be valid if eeprom has been erased and replaced whole eeprom with 0
+#define NOTEDITED 0 // 0 = FRESH ERASED. OR RESET
+//FALSE IS NATURALLY ZERO SO NEED FOR MACRO.
+//TRUE IS NATURALLY 255 SO NO NEED FOR MACRO.
+//some variables to be included in the structs below as default. this is necessary so that incubator can fall back to these if eeprom fails.
+//might not need these variables, simple constants while instantiating the struct object should be good enough.
+uint8_t eggType = 0; //if it is zero no egg type is chosen.
+//this will be used with egg type variable. certain number represent that config. and whenever incubator is loaded it will automatically load that incubator.
 #define CHICKEN 1
+#define PARROT 2
+#define QUAIL 3
+//might use define instead of variables to save space.
 double tempSetpoint = 37.5; //this set of variables are unnecessary. might delete it after im done testing this eeprom manager.
 uint8_t humiditySetpoint = 60;
 uint8_t frequency = 8;
 uint8_t turnDelay = 2; //in seconds
 uint8_t daysToHatch = 21;
 uint8_t incubationPeriod = 21;
-uint32_t turnInterval = 5000;
+uint8_t turnInterval = 5; //will store value as seconds instead of milliseconds.
 double Kp = 10;
 double Ki = 5;
 double Kd = 1.8;
 uint8_t incubationStart = 255;
+uint8_t lockdownDay = 18;
+double lockdownTemp = 37.5;
+uint8_t lockdownHum = 70;
+bool configChanged = false;
 
-config defaultConfig = { //settings default values
-    tempSetpoint,
-    humiditySetpoint,
-    frequency,
-    turnDelay,
-    daysToHatch,
-    incubationPeriod,
-    turnInterval,
-    Kp,
-    Ki,
-    Kd,
-    eggType,
-    CONFIG_VERSION};
+//if you wanna make other eggconfig for example for parrots etc. make it in a similar manner. create another struct object and fill the default values and give it a name.
+//try to store configs like these in the program instead of eeprom to keep the dependance on eeprom as little as possible because of write cycle limit.
+eggConfig myEggConfig = //this is the only struct that is going to be used througout the code. whatever changes is done will be done to this struct.
+    {
+        tempSetpoint,
+        humiditySetpoint,
+        frequency,        // you might think this value is related to incubator but actually frequency changes with different eggs.
+        incubationPeriod, //loading in the default values for a chicken incubation.
+        lockdownDay,      //this changes from egg to egg. will be useful when we tell the motor to stop turning after lockdown day.
+        lockdownTemp,
+        lockdownHum,
+        CONFIG_VERSION //this is needed always to check for the integrity of data received.
+};                     //very important for a succesful hatch.
 
-config chickenConfig = {
-  37.5,
-  60,
-  8,
-  2,
-  21,
-  21,
-  
-  10,
-  5,
-  3,
-  CHICKEN,
-  CONFIG_VERSION
-};
+eggConfig chickenEggConfig = //CONTAINS HARDCODE VALUES FOR CHICKEN INCUBATION.
+    {
+        37.5, //this set of variables are unnecessary. might delete it after im done testing this eeprom manager.
+        60,
+        8,
+        21,
+        18,
+        37.5,
+        70,
+        CONFIG_VERSION};
 
-#define chickenConfigAdd 50
-#define customConfigAdd1 150
-#define customConfigAdd2 250
+//TODO: add more eggconfigurations for different types of eggs. declaring it here is better than relying on eeprom.
 
+incubatorStatus myIncStatus = //this is completely unrelated to the egg config. supposed to be stored in a different location so incubator can remember.
+    {
+        21, //will keep track of the current day of incubation. will be useful for future updates.
+        NOTEDITED,
+        false,     //incubationInProgress.
+        NOTEDITED, //start day by default is unedited.
+        NOTEDITED,
+        NOTEDITED,
+        eggType, //might use this in setup when choosing egg type. and based on that load config. (will load config according to this variable.)
+        CONFIG_VERSION};
+
+incubatorConfig myIncConfig = //completely unrelated to the rest of the structs. this will remember the config of the incubator because it won't be often changed.
+    {
+        turnDelay,    //in seconds
+        turnInterval, //in seconds          incstatus and incconfig should both be saved in eeprom and loaded when arduino starts.
+        Kp,
+        Ki,
+        Kd,
+        CONFIG_VERSION};
+
+//working with these structs mean that individually saving the values to eeprom might not be possible. or might be a bit of work to figure out what the precise address is
+//so only saving the config all together makes sense.
+//might not need these address if working with structs.
 //Addresses
+
+//I think zeroth address should contain the currently running values. and whenever incubator reboots it will simply load whatevers in that eeprom. should make things easy
 #define tempAdd 0
 #define humAdd 4
 #define freqAdd 8
@@ -155,10 +276,12 @@ config chickenConfig = {
 #define pAdd 20
 #define iAdd 24
 #define dAdd 28
-#define firstSetupAdd 500      //if this byte is 0xff or 255 in decimal its a fresh start otherwise this incubator has been programmed before. 
-                               //should help out in setup when im asking the users a couple of questions. wouldn't need to repeat if i know  
-                               //if it is infact their first time operating the incubator.
-#define incubationStartAdd 499 //if this byte is high means incubation is on going. otherwise it hasn't begun yet.
+//only the first config add has to be manually set.
+#define chickenConfigAdd 50                                           //this address will always store the currently running config address.NOT!. currentconfig running will always be stored in ram and fetched from eeprom.
+#define customConfigAdd1 (chickenConfigAdd + sizeof(myEggConfig) + 1) //whenever loading custom config. that config will be simply copied to currentConfig.
+#define customConfigAdd2 (customConfigAdd1 + sizeof(myEggConfig) + 1) //these addresses will be loaded when used chooses to save config. if one is already written to. it will ask to overwrite or choose another location.
+#define incuStatusAdd (customConfigAdd2 + sizeof(myEggConfig) + 1)
+#define incuConfigAdd (incuStatusAdd + sizeof(myIncStatus)) //need to calculate addresses this way as structs size is bound to changed in later updates.
 
 //------------OBJECT initialization------------
 #ifdef SENSORMODEDHT
@@ -191,7 +314,7 @@ RTC_DS3231 rtc;
 #endif
 
 /*------------function declarations--------------*/
-void firstTimeSetup();
+bool firstTimeSetup();
 bool isTime();
 void motorHandler();
 void updateMenu();
@@ -201,10 +324,10 @@ bool turnMotorOnce();
 void updateSensor();
 void homeMenu();
 void poll();
-void loadConfig(int add);
-void saveConfig(int add, config myConfig);
-bool editValue(int add, double &value, double incBy);
-bool editValue(int add, uint8_t &value, uint8_t incBy);
+void loadConfig(int add); //will be better if its able to load any config passed to it. and only edit that config.
+//void saveConfig(int add, config myConfig);  use the simple EEPROM.put method instead of this as its basically the same thing but better
+bool editValue(double &value, double incBy);
+bool editValue(uint8_t &value, uint8_t incBy);
 extern char *inttostr(char *dest, short integer);
 // Apply left padding to string.
 extern char *lpad(char *dest, const char *str, char chr = ' ', unsigned char width = LCD_COLS);
@@ -213,17 +336,23 @@ extern char *rpad(char *dest, const char *str, char chr = ' ', unsigned char wid
 // Apply string concatenation. argc = number of string arguments to follow.
 extern char *fmt(char *dest, unsigned char argc, ...);
 char *padc(char chr, unsigned char count);
-
 byte processRuntimeMenuCommand(byte cmdId);
 void refreshMenuDisplay(byte refreshMode);
 byte getNavAction();
+template <typename T>
+bool saveConfiguration(int add, T config);
+template <typename T>
+bool copyConfiguration(T configDest, T configSource);
+bool loadConfiguration();
+bool startNewHatch(int eggT);
+void errorHandler();
 
 void setup()
 {
   // put your setup code here, to run once:
   //EEPROM.put(tempAdd,tempSetpoint);
   //initial setup check.
-
+  loadConfiguration();
 #ifdef SENSORMODEDHT
   dht.begin();
 #endif
@@ -236,6 +365,12 @@ void setup()
 #endif
   lcd.init();
   lcd.backlight();
+  lcd.createChar(tick, tickChar);
+  lcd.createChar(time, timeChar);
+  lcd.createChar(memory, memoryIcon);
+  lcd.createChar(motor, motorIcon);
+  lcd.createChar(sensor, sensorIcon);
+
 #ifdef MOTORTYPELIMIT
   sw1.begin();
   sw2.begin(); //create a conditional here if mode is limit only then initialize.
@@ -243,7 +378,7 @@ void setup()
   DW.begin();
   UP.begin();
   SL.begin();
-  firstTimeSetup(); //will entirely depends wether that one byte in eeprom. if its 255 meaning its first time. otherwise directly jump into loop
+  //will entirely depends wether that one byte in eeprom. if its 255 meaning its first time. otherwise directly jump into loop
 #ifndef HEATERMODERELAY
   myPID.SetMode(AUTOMATIC);
   myPID.SetSampleTime(2300); //2.3 seconds because of slow sensors
@@ -251,11 +386,17 @@ void setup()
 #ifdef USINGRTC
   if (!rtc.begin()) //make it print to lcd if this happens
   {
-    abort();
+    ERROR = RTCFAILED;
   }
+
 #endif
 
+  if (!firstTimeSetup())
+  {
+    ERROR = RTCFAILED;
+  }
   //---------PINS INITIALIZATION-------------
+
   pinMode(motorPinA, OUTPUT);
   pinMode(motorPinB, OUTPUT);
   pinMode(dehumFan, OUTPUT);
@@ -263,16 +404,10 @@ void setup()
   pinMode(humidifier, OUTPUT);
   pinMode(waterLevelSensor, OUTPUT);
 #endif
-  //should be called after values are read from EEPROM
-  //readFromEEPROM();
-  //turnInterval = (24 / frequency) * 3600000;
-  readFromEEPROM();
-  if (incubationStart == true && eggType == CHICKEN)
-  {
-    loadConfig(chickenConfigAdd);
-  }
+  lcd.clear();
   appMode = APP_NORMAL_MODE;
   refreshMenuDisplay(REFRESH_DESCEND);
+  lcd.clear();
 }
 
 void loop()
@@ -281,6 +416,7 @@ void loop()
   currentTime = millis();
   poll();
   updateSensor();
+  homeMenu();
   //correction();
   //motorHandler();
   switch (appMode)
@@ -291,10 +427,6 @@ void loop()
       lcd.clear();
       appMode = APP_MENU_MODE;
       refreshMenuDisplay(REFRESH_DESCEND);
-    }
-    else
-    {
-      homeMenu();
     }
     break;
   case APP_MENU_MODE:
@@ -786,13 +918,10 @@ void homeMenu()
     lcd.setCursor(0, 0);
     lcd.print("T:");
     lcd.print(currentTemp);
-    lcd.setCursor(9, 0);
+    lcd.setCursor(0, 1);
     lcd.print("H:");
     lcd.print(h);
-    lcd.setCursor(0, 1);
-    lcd.print(defaultConfig.incubationPeriod);
-    lcd.print(" ");
-    lcd.print(defaultConfig.version);
+    errorHandler(); //will update the
     update_sensor = false;
   }
 }
@@ -906,16 +1035,16 @@ byte processRuntimeMenuCommand(byte cmdId)
     break;
 
   case runtimeCmdSetTemp:
-    complete = editValue(tempAdd, tempSetpoint, 0.5);
+    complete = editValue(myEggConfig.tempSetpoint, 0.5);
     break;
   case runtimeCmdSetHum:
-    complete = editValue(humAdd, humiditySetpoint, 1);
+    complete = editValue(myEggConfig.humiditySetpoint, 1);
     break;
   case runtimeCmdSetFreq:
-    complete = editValue(freqAdd, frequency, 1);
+    complete = editValue(myEggConfig.frequency, 1); //there is probably need to seperate egg related menu, incubator related and status menu.
     break;
   case runtimeCmdSetTurnDelay:
-    complete = editValue(turnDelayAdd, turnDelay, 1);
+    complete = editValue(myIncConfig.turnDelay, 1);
     break;
   case runtimeCmdSetHours:
     break;
@@ -930,18 +1059,22 @@ byte processRuntimeMenuCommand(byte cmdId)
   case runtimeCmdSetDay:
     break;
   case runtimeCmdSetP:
-    complete = editValue(pAdd, Kp, 0.1);
+    complete = editValue(myIncConfig.Kp, 0.1);
     break;
   case runtimeCmdSetI:
-    complete = editValue(iAdd, Ki, 0.1);
+    complete = editValue(myIncConfig.Ki, 0.1);
     break;
   case runtimeCmdSetD:
-    complete = editValue(dAdd, Kd, 0.1);
+    complete = editValue(myIncConfig.Kd, 0.1);
     break;
   case runtimeCmdIncubationTime:
-    complete = editValue(incubationPAdd, incubationPeriod, 1);
+    complete = editValue(myEggConfig.incubationPeriod, 1);
     break;
   case runtimeCmdSaveProfile:
+    if (SL.wasPressed())
+    {
+      lcd.clear();
+    }
     break;
   case runtimeCmdShowHatchDay:
     break;
@@ -953,14 +1086,79 @@ byte processRuntimeMenuCommand(byte cmdId)
     break;
   case runtimeCmdConfirmation:
     //TODO. save all settings here or maybe make a new profile at a different eeprom address.
+    //this command is not working properly. need to figure out whats wrong. seems like getting stuck in while loop.
+    char buf[sizeof(CONFIG_VERSION)];
+    int checkAdd = customConfigAdd1 + sizeof(myEggConfig) - sizeof(myEggConfig.version);
+    EEPROM.get(checkAdd, buf);
+
+    if (strcmp(buf, CONFIG_VERSION) == 0)
+    {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Full. overWrite");
+      lcd.setCursor(0, 1);
+      lcd.print("Custom1 config?");
+      delay(2000);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("YES  [UP]");
+      lcd.setCursor(0, 1);
+      lcd.print("NO   [DOWN]");
+      uint32_t timer = millis();
+      do
+      {
+        uint32_t delta = millis() - timer;
+        poll();
+        if (UP.wasPressed())
+        {
+          EEPROM.put(customConfigAdd1, myEggConfig);
+          complete = true;
+          lcd.clear();
+          break;
+        }
+        else if (DW.wasPressed())
+        {
+          complete = true;
+          lcd.clear();
+          break;
+        }
+        else if (delta >= 10000)
+        {
+          complete = true;
+          lcd.clear();
+          break;
+        }
+      } while (complete == false);
+    }
+    else
+    {
+      EEPROM.put(customConfigAdd1, myEggConfig);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Saving As");
+      lcd.setCursor(0, 1);
+      lcd.print("Custom 1");
+      delay(2000);
+      lcd.clear();
+      complete = true;
+    }
 #ifndef HEATERMODERELAY
     myPID.SetTunings(Kp, Ki, Kd);
 #endif
+    complete = true;
     break;
   default:
     break;
   }
 
+  if (configChanged == true && complete) //TODO: add an and condition to wether its in default cmd or not. if default dont save to eeprom. instead load other values? not sure.
+  {
+    saveConfiguration(0, myEggConfig);
+    configChanged = false;
+  }
+
+//if cmdid == resettodefault    EZ. 
+//  myEggConfig = chickenEggConfig; 
   return complete;
 }
 
@@ -1056,19 +1254,7 @@ void refreshMenuDisplay(byte refreshMode)
 //alarm on lockdown day to notify the user that its time.
 //print a pdf with all the pre incubation and post incubation instructions. and include it with the incubator
 
-void readFromEEPROM()
-{
-  EEPROM.get(tempAdd, tempSetpoint);
-  EEPROM.get(humAdd, humiditySetpoint);
-  EEPROM.get(freqAdd, frequency);
-  EEPROM.get(turnDelayAdd, turnDelay);
-  EEPROM.get(pAdd, Kp);
-  EEPROM.get(iAdd, Ki);
-  EEPROM.get(dAdd, Kd);
-  EEPROM.get(incubationPAdd, incubationPeriod);
-}
-
-bool editValue(int add, uint8_t &value, uint8_t incBy)
+bool editValue(uint8_t &value, uint8_t incBy)
 {
   lcd.setCursor(1, 1);
   lcd.print(value);
@@ -1091,9 +1277,9 @@ bool editValue(int add, uint8_t &value, uint8_t incBy)
   }
   if (SL.wasPressed())
   {
+    configChanged = true;
     lcd.setCursor(1, 1);
     lcd.print("Saving...");
-    EEPROM.put(add, value);
     delay(500);
     lcd.setCursor(1, 1);
     lcd.print("          ");
@@ -1105,7 +1291,7 @@ bool editValue(int add, uint8_t &value, uint8_t incBy)
   }
 }
 
-bool editValue(int add, double &value, double incBy)
+bool editValue(double &value, double incBy)
 {
   lcd.setCursor(1, 1);
   lcd.print(value);
@@ -1128,9 +1314,9 @@ bool editValue(int add, double &value, double incBy)
   }
   if (SL.wasPressed())
   {
+    configChanged = true;
     lcd.setCursor(1, 1);
     lcd.print("Saving...");
-    EEPROM.put(add, value);
     delay(500);
     lcd.setCursor(1, 1);
     lcd.print("          ");
@@ -1142,13 +1328,12 @@ bool editValue(int add, double &value, double incBy)
   }
 }
 
-void firstTimeSetup()
+bool firstTimeSetup()
 {
-  uint8_t value = 0;
-  EEPROM.get(firstSetupAdd, value);
-  if (value != 0) //if value != 0 meaning this address has been written to before. so assume its not first setup and return.
+  //be sure to call this after you load the configuration.
+  if (myIncStatus.firstSetup == EDITED) //if value != 0 meaning this address has been written to before. so assume its not first setup and return.
   {
-    return;
+    return false;
   }
   else
   {
@@ -1187,9 +1372,7 @@ void firstTimeSetup()
         lcd.setCursor(0, 0);
         lcd.print("SELECT EGGS    ");
         delay(2000);
-        incubationStart = true;
-        value = 255;
-        EEPROM.put(firstSetupAdd, value); //value just has to be above 0. actual value doesn't matter.
+        lcd.clear();
         setupDone = true;
       }
       else if (DW.wasPressed())
@@ -1200,21 +1383,26 @@ void firstTimeSetup()
         lcd.setCursor(0, 1);
         lcd.print("Home Page...");
         delay(2000);
-        incubationStart = false;
-        value = 255; //not first setup anymore.
-        EEPROM.put(firstSetupAdd, value);
+        lcd.clear();
+        myIncStatus.incubationInProgress = false;
+        myIncStatus.firstSetup = EDITED;
         setupDone = true;
       }
       else if ((millis() - timer) >= 10000) //if in 10 seconds no input assume no hatch needs to be done.
       {
         //load in chicken config.
         lcd.clear();
+        lcd.setCursor(0, 0);
         lcd.print("Going to");
         lcd.setCursor(0, 1);
         lcd.print("Home Page...");
         delay(2000);
+        lcd.clear();
+        myIncStatus.firstSetup = EDITED;
+        myIncStatus.incubationInProgress = false;
         incubationStart = false;
         setupDone = true;
+        break;
       }
     } while (setupDone == false);
 
@@ -1229,44 +1417,175 @@ void firstTimeSetup()
         lcd.setCursor(0, 0);
         lcd.print("Chicken [UP]");
         lcd.setCursor(0, 1);
-        lcd.print("Other [DW] ");
+        lcd.print("Other [DOWN] ");
         poll();
         if ((millis() - timer) >= 10000)
         {
+          myIncStatus.incubationInProgress = false;
+          myIncStatus.firstSetup = EDITED;
           incubationStart = false;
           setupDone = true;
+          lcd.clear();
+          break;
         }
-        else if (SL.wasPressed())
+        else if (UP.wasPressed())
         {
+          myIncStatus.daysToHatch = 21; //because chicken. has to be manually set if choosing another type.
+          startNewHatch(CHICKEN);
           incubationStart = true;
-          loadConfig(chickenConfigAdd);                    //will load chicken config into default/current config.
-          EEPROM.put(incubationStartAdd, incubationStart); //in order to remember it.
           setupDone = true;
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Starting With");
+          lcd.setCursor(0, 1);
+          lcd.print("chicken config.");
+          delay(2000);
+          lcd.clear();
+          break;
         }
         else if (DW.wasPressed())
         {
           incubationStart = false;
+          lcd.clear();
           setupDone = true;
+          break;
         }
 
       } while (setupDone == false);
     }
+    return true;
   }
 }
 
-void loadConfig(int add) //just need to pass one of the above addresses where configurations are stored.
+//first load the incubator status config and then based on its egg type variable choose from which address to load the eggConfig from.
+//second load the incubator settings config.
+//lastly load the egg config as it could be stored in a different place.
+bool loadConfiguration() //there is nothing it can take from its flash or ram as its supposed to be dynamic.
 {
-  char ver[sizeof(CONFIG_VERSION)];
-
-  EEPROM.get((add + sizeof(defaultConfig) - sizeof(defaultConfig.version)), ver);
-  if (strcmp(ver, defaultConfig.version) == 0)
+  byte succesfull = false;
+  char buf[sizeof(CONFIG_VERSION)];
+  int checkAdd = ((incuStatusAdd + sizeof(myIncStatus) - sizeof(myIncStatus.version)));
+  EEPROM.get(checkAdd, buf);            //first read the check address content. after that compare it. if its good then laod the data otherwise. turn on error variable and load default
+  if (strcmp(buf, CONFIG_VERSION) == 0) //if equal to zero = both strings are a mathc.
   {
-    EEPROM.get(add, defaultConfig);
+    EEPROM.get(incuStatusAdd, myIncStatus); //will load the values only if check succeeds otherwise load default
   }
-  //else by default use the values declared above
+  else
+  {
+    ERROR = VERCHECKERROR;
+  }
+  checkAdd = ((incuConfigAdd + sizeof(myIncConfig)) - sizeof(myIncConfig.version));
+  EEPROM.get(checkAdd, buf);
+  if (strcmp(buf, CONFIG_VERSION) == 0)
+  {
+    EEPROM.get(incuConfigAdd, myIncConfig);
+  }
+  else
+  {
+    ERROR = VERCHECKERROR;
+  }
+  if (myIncStatus.eggType == CHICKEN)
+  {
+    checkAdd = ((chickenConfigAdd + sizeof(myEggConfig)) - sizeof(myEggConfig.version));
+    EEPROM.get(checkAdd, buf);
+    if (strcmp(buf, CONFIG_VERSION) == 0)
+    {
+      EEPROM.get(chickenConfigAdd, myEggConfig);
+    }
+    else
+    {
+      ERROR = VERCHECKERROR;
+    }
+  }
+  if (ERROR == VERCHECKERROR)
+    succesfull = false;
+  else
+    succesfull = true;
+
+  return succesfull;
 }
 
-void saveConfig(int add, config myConfig)
+template <typename T>
+bool saveConfiguration(int add, T config)
 {
-  EEPROM.put(add, myConfig);
+  char buf[sizeof(CONFIG_VERSION)];
+  int checkAdd = ((add + sizeof(config)) - sizeof(config.version)); //calculate to read back if the data written is good.
+
+  EEPROM.put(add, config);
+  EEPROM.get(checkAdd, buf);
+  if (strcmp(buf, CONFIG_VERSION) == 0)
+  {
+    return true; //succesful write.
+  }
+  else
+  {
+    ERROR = SAVEFAILED;
+    return false;
+  }
 }
+
+template <typename T>
+bool copyConfiguration(T configDest, T configSource)
+{
+  configDest = configSource; //will have to check if this will work. should work as long as your structures do not contain any pointers.
+  return true;
+}
+
+//do all the bookkeeping before starting a new hatch in here.
+bool startNewHatch(int eggT)
+{
+  byte succesfull = false;
+  DateTime now = rtc.now();
+  if (!rtc.begin())
+  {
+    return false;
+    ERROR = RTCFAILED;
+  }
+  if (eggT == CHICKEN)
+  {
+    myIncStatus.eggType = CHICKEN;
+    myIncStatus.daysToHatch = 21;
+  }
+  myIncStatus.incubationInProgress = true;
+  myIncStatus.incubationStartDay = now.day();
+  myIncStatus.incubationStartMonth = now.month();
+  myIncStatus.incubationStartYear = now.year();
+  myIncStatus.firstSetup = EDITED;
+
+  succesfull = saveConfiguration(incuStatusAdd, myIncStatus);
+  return succesfull;
+}
+
+void errorHandler() //TO BE INCLUDED IN HOME MENU
+{
+  switch (ERROR)
+  {
+  case NOERROR:
+    lcd.setCursor(14, 0);
+    lcd.write(tick);
+    lcd.setCursor(15, 0);
+    lcd.write(tick);
+    lcd.setCursor(14, 1);
+    lcd.write(tick);
+    lcd.setCursor(15, 1);
+    lcd.write(tick);
+    break;
+
+  case VERCHECKERROR:
+    lcd.setCursor(14, 0);
+    lcd.write(memory);
+    break;
+  case SENSORERROR:
+    lcd.setCursor(15, 0);
+    lcd.write(sensor);
+    break;
+  case SAVEFAILED:
+    break;
+  case RTCFAILED:
+    lcd.setCursor(16, 0);
+    lcd.write(time);
+    break;
+  }
+}
+
+//TODO: CREATE A CONFIG FUNCTION IN WHICH ALL SETTINGS WILL BE SET TO DEFAULT.

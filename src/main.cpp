@@ -346,7 +346,7 @@ bool copyConfiguration(T configDest, T configSource);
 bool loadConfiguration();
 bool startNewHatch(int eggT);
 void errorHandler();
-
+//custon config save and load method still needs work 
 void setup()
 {
   // put your setup code here, to run once:

@@ -45,3 +45,15 @@ It's certainly been a while. having learned a lot of new things I'd like to inte
 7. a one-page setting up instruction that will make it easy for the user to get started.
 8. think about power-saving modes and making it developer friendly.
 9. interface will be platform independent; web, android, ios. probably will base it on the web and serve it with Flutter.
+
+
+### parts of the project 
+1. Android app 
+2. Hardware
+3. microcontroller programming
+
+* to make this a bit easier I'm going to use react native for app development. 
+* should start working on the app even without hardware as I can set up a Firebase database FAST that will emulate the working of hardware. 
+* for microcontroller programming, I'm going to use a jtag programmer (can be programmed with just USB) and will use idf for it. video  resources from learnesp32.com will be a huge help.
+ 
+

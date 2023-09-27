@@ -55,5 +55,75 @@ It's certainly been a while. having learned a lot of new things I'd like to inte
 * to make this a bit easier I'm going to use react native for app development. 
 * should start working on the app even without hardware as I can set up a Firebase database FAST that will emulate the working of hardware. 
 * for microcontroller programming, I'm going to use a jtag programmer (can be programmed with just USB) and will use idf for it. video  resources from learnesp32.com will be a huge help.
- 
+
+
+ --- UPDATE 9/28/2023 ---
+### EXPECTED APP CAPABILLITIES 
+
+#### features
+
+1. login/signup screen
+- login/signup via email/facebook/gmail 
+- each user will have personal profile, details are not duplicated
+
+
+2. dashboard screen 
+
+#### pair (complex method but will guide about implementing it) 
+- when clicked on pair should open the camera to scan a barcode
+- access the captured barcode, intiate the pairing routine
+- shows pairing status, if alive signal is updated constantly then currently paired
+
+#### live info (gets data from firebase and shows it only)
+- temp, humidity, water level, intensity of heater, rotation done/total rotations per day, next rotation scheduled for 
+
+* hatch settings (gets and sets data to firebase) 
+- hatch no, hatch status(on going or off), days left for hatch, hatch profile selected, hatch diary (get's detailed about success rate and any other notes the user might want to save, save pictures etc), initiate new hatch, cancel hatch, hatch alarms setup
+
+#### current hatch settings 
+- updates a flag in firebase that will override the current settings selected
+and will implement settings made in this page
+- temp, rotations per day, hatch period etc 
+
+#### history 
+- shows a graph of temperature over time, divided into daily graphs 
+ as well as average graph until now 
+-warnining history
+- shows any power failure or any mis happenings, it's time, cause and solution 
+
+- certain hatch history (stores all the information mentioned below will be saved under different hatches
+should contain history of alarms, warning, incubator version and all the current settings from the user) 
+- abillity to share that history as an excel file or word document. 
+
+#### sensor info (get realtime update from firebase
+- sensors status (OK/NA(not available)/FAULTY) such as temp, humidity, water sensor, door sensor
+
+#### software info (get data from firebase) 
+- version currently running, last OTA updated, available update,roll back last update
+
+
+3. settings 
+- profile settings(picture, bio, name, username )
+
+#### hatch profile settings
+- selects a profile like (chicken eggs or parrot eggs)changes default temp, humidity level and rotations
+
+- alarm settings
+- lets the user edit alarms such as
+- alarm conditions, toggle preset alarms, alarm history(records and shows all the alarm over that hatch) 
+
+4. help 
+- hatching wiki (a book containing detail about hatching eggs) 
+- questions (lets user search for questions and finds answer to that from book or internet) 
+- contact support 
+- complain
+- any other helping material 
+
+
+5. about us 
+- details about the company 
+
+
+
+
 

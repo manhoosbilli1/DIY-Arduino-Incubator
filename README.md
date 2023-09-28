@@ -121,7 +121,65 @@ should contain history of alarms, warning, incubator version and all the current
 
 
 5. about us 
-- details about the company 
+- details about the company
+
+
+
+#### Basic features 
+
+1. signup/login screen with email password. authenticates with firebase
+
+- Start hatch 
+- pause hatch
+- abort hatch 
+
+
+2. dashboard with text boxes that will show current value fetched from firebase 
+the text boxes are following 
+- temperature in degree celcius. (0-100 float)
+- humidity in percentage (whole number ranging from 0-100)
+- water reservoir level
+- rotation done/total rotation (whole number) 
+- days/total days(usually 21) (whole number)
+- errors (horizontal box with images of sensors such as temp and humidity with tick mark or cross) 
+
+
+3. settings
+has editables text boxes that updates corresponding firebase value
+note that all these text boxes will fetch last saved value from firebase
+which will then be edited if desired. 
+ 
+- setpoint temperature
+- setpoint humidity
+- setpoint rotations per day 
+- incubation period (limit 1-60 days) 
+- stop rotation alarm (out of 21 choose a day. limit is total hatch day) 
+- setpoint temperature limit (user is notified if temp exceeds this) 
+- setpoint humidity limit 
+- alarm, user choosing date and time and a note. user is notified on the app
+- alarm will have an action attached to it that can be turned on if needed
+- actions are following; stop turning, change temp, change humidity,
+- set PID values 
+- motor turn time (time taken to turn the eggs enough to tilt them) 
+- Reset all settings 
+
+
+4. history 
+shows graph of 24 hours of data. after every 24 hour data is rewritten.
+- temperature history graph
+- humidity history graph
+
+
+5. notifications
+all these notification should have the abillity to notify even if the 
+screen is turn off or the app is not currently being used. 
+
+- over/low temperature (when current temperature is above/below preset value for 2 minutes, hatch has to be in progress for this) 
+- over/low humidity (when current humidity is above/below preset value)
+- incubator turned off (will poll for an alive signal from firebase. if
+that signal is not updated it will consider the incubator to be off) 
+- water level low 
+- door open 
 
 
 

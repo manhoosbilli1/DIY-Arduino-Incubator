@@ -129,9 +129,9 @@ should contain history of alarms, warning, incubator version and all the current
 
 1. signup/login screen with email password. authenticates with firebase
 
-- Start hatch 
-- pause hatch
-- abort hatch 
+- Start hatch  (button)
+- pause hatch  (button)
+- abort hatch  (button)
 
 
 2. dashboard with text boxes that will show current value fetched from firebase 

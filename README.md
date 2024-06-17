@@ -182,6 +182,10 @@ that signal is not updated it will consider the incubator to be off)
 - door open 
 
 
+UPDATE 17/ JUNE / 2024 
+I forgot to mention that this project has now been moved to the Capibator repository. i figured things were getting messy and since i had decided what i wanted to do for the final version so that where i'd be doing this. Capibator is an organization containing different repositories for this products hardware, firmware, app and accompanying website. since i'm hoping to release this as product soon enough i've decided to take these steps of seperating the working stuff from experimental stuff.. but promise is a promise and all designs and firmware will remain open source. FOREVER! 
+
+
 
 
 
